@@ -71,16 +71,20 @@ impl NvimRendererBridge {
         // Update the active scroll region - this is the region currently being animated
         self.active_scroll_region = Some((top, bottom));
 
-        // Convert grid scroll to smooth scroll delta
-        // Positive rows = scroll down (content moves up)
-        // Negative rows = scroll up (content moves down)
-        let scroll_delta = -(rows as f32);
+        // Neovim has already updated the grid content to the NEW position
+        // We need to offset it back to the OLD position, then animate to 0
+        //
+        // If rows=-1: content scrolled up (show it at old position: +1 line = +26px offset)
+        // If rows=+1: content scrolled down (show it at old position: -1 line = -26px offset)
+        //
+        // So the initial offset is OPPOSITE of the scroll direction (no negation)
+        let pixel_offset = (rows as f32) * size_info.cell_height();
 
-        eprintln!("🔥 NVIM Applying smooth scroll delta: {} to region ({}, {})",
-                  scroll_delta, top, bottom);
+        eprintln!("🔥 NVIM Setting initial offset: {}px to region ({}, {}) - will animate to 0",
+                  pixel_offset, top, bottom);
 
-        // Apply smooth scroll animation
-        renderer.update_smooth_scroll(scroll_delta);
+        // Set the offset directly (bypasses bounds checking)
+        renderer.set_nvim_scroll_offset(pixel_offset);
 
         self.last_scroll_rows = rows;
     }

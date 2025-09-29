@@ -1140,11 +1140,19 @@ impl Renderer {
         self.last_input_dir = 0.0;
     }
 
+    /// Set Neovim scroll offset directly (bypasses bounds checking)
+    /// This is used when Neovim has already scrolled the content and we just
+    /// want to temporarily show it at the old position, then animate to 0
+    pub fn set_nvim_scroll_offset(&mut self, pixel_offset: f32) {
+        eprintln!("🔥 NVIM Setting scroll offset: {}", pixel_offset);
+        self.simple_scroll_residual = pixel_offset;
+        self.direct_scroll_total_px = pixel_offset;
+    }
+
     /// Advance smooth scroll animation for Neovim (no line scrolling, pure pixel animation)
     pub fn advance_nvim_smooth_scroll(&mut self, dt: f32) -> f32 {
-        // Simple exponential decay animation
+        // Simple exponential decay animation towards zero
         let decay_factor = 0.85_f32.powf(dt * 60.0); // 60fps normalized
-        let current_offset = self.simple_scroll_residual;
 
         // Animate towards zero
         self.simple_scroll_residual *= decay_factor;
@@ -1154,6 +1162,7 @@ impl Renderer {
             self.simple_scroll_residual = 0.0;
         }
 
+        eprintln!("🔥 NVIM Scroll offset: {}", self.simple_scroll_residual);
         self.simple_scroll_residual
     }
 

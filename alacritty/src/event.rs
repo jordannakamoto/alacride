@@ -2081,9 +2081,17 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                 // Translate mouse wheel to Neovim scroll commands
                                 use winit::event::MouseScrollDelta;
                                 let scroll_lines = match delta {
-                                    MouseScrollDelta::LineDelta(_x, y) => y as i32,
-                                    MouseScrollDelta::PixelDelta(pos) => (pos.y / 20.0) as i32,
+                                    MouseScrollDelta::LineDelta(_x, y) => {
+                                        eprintln!("🔥 MOUSE LineDelta: y={}", y);
+                                        y as i32
+                                    },
+                                    MouseScrollDelta::PixelDelta(pos) => {
+                                        eprintln!("🔥 MOUSE PixelDelta: y={}", pos.y);
+                                        (pos.y / 20.0) as i32
+                                    },
                                 };
+
+                                eprintln!("🔥 MOUSE scroll_lines={}", scroll_lines);
 
                                 if scroll_lines != 0 {
                                     // Send Ctrl-Y (scroll up) or Ctrl-E (scroll down) to Neovim
@@ -2092,6 +2100,8 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                     } else {
                                         "<C-e>".repeat(scroll_lines.abs() as usize)
                                     };
+
+                                    eprintln!("🔥 MOUSE Sending to Neovim: {}", command);
 
                                     if let Err(e) = nvim_mode.send_input(&command) {
                                         error!("Failed to send scroll to Neovim: {}", e);
