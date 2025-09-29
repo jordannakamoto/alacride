@@ -2075,30 +2075,57 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                         self.ctx.window().set_mouse_visible(true);
 
                         // Handle Neovim mode mouse wheel separately
-                        let mut handled = false;
                         if let Some(nvim_mode) = self.ctx.nvim_mode {
                             if nvim_mode.is_active() {
-                                // Translate mouse wheel to Neovim scroll commands
                                 use winit::event::MouseScrollDelta;
-                                let scroll_lines = match delta {
+                                use std::cell::Cell;
+
+                                // Thread-local accumulator for pixel deltas
+                                thread_local! {
+                                    static SCROLL_ACCUMULATOR: Cell<f64> = Cell::new(0.0);
+                                }
+
+                                let cell_height = self.ctx.display.size_info.cell_height() as f64;
+
+                                let pixel_delta = match delta {
                                     MouseScrollDelta::LineDelta(_x, y) => {
                                         eprintln!("🔥 MOUSE LineDelta: y={}", y);
-                                        y as i32
+                                        y as f64 * cell_height
                                     },
                                     MouseScrollDelta::PixelDelta(pos) => {
                                         eprintln!("🔥 MOUSE PixelDelta: y={}", pos.y);
-                                        (pos.y / 20.0) as i32
+                                        pos.y
                                     },
                                 };
+
+                                // Accumulate pixels
+                                let accumulated = SCROLL_ACCUMULATOR.with(|acc| {
+                                    let current = acc.get() + pixel_delta;
+                                    acc.set(current);
+                                    current
+                                });
+
+                                eprintln!("🔥 MOUSE accumulated={}, cell_height={}", accumulated, cell_height);
+
+                                // Calculate how many full lines we've accumulated
+                                let scroll_lines = (accumulated / cell_height).trunc() as i32;
 
                                 eprintln!("🔥 MOUSE scroll_lines={}", scroll_lines);
 
                                 if scroll_lines != 0 {
-                                    // Send Ctrl-Y (scroll up) or Ctrl-E (scroll down) to Neovim
+                                    // Subtract the lines we're consuming from accumulator
+                                    SCROLL_ACCUMULATOR.with(|acc| {
+                                        acc.set(accumulated - (scroll_lines as f64 * cell_height));
+                                    });
+
+                                    // Send scroll commands that work in both normal and insert mode
+                                    // In insert mode: <C-X><C-Y> scrolls up, <C-X><C-E> scrolls down
+                                    // In normal mode: <C-Y> scrolls up, <C-E> scrolls down
+                                    // We'll use the insert-mode compatible version which works in both
                                     let command = if scroll_lines > 0 {
-                                        "<C-y>".repeat(scroll_lines.abs() as usize)
+                                        "<C-X><C-Y>".repeat(scroll_lines.abs() as usize)
                                     } else {
-                                        "<C-e>".repeat(scroll_lines.abs() as usize)
+                                        "<C-X><C-E>".repeat(scroll_lines.abs() as usize)
                                     };
 
                                     eprintln!("🔥 MOUSE Sending to Neovim: {}", command);
@@ -2107,14 +2134,15 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                         error!("Failed to send scroll to Neovim: {}", e);
                                     }
                                     *self.ctx.dirty = true;
-                                    handled = true;
                                 }
+                                // Always mark as handled in Neovim mode to prevent fallthrough
+                                // to terminal scrolling system
+                                return;
                             }
                         }
 
-                        if !handled {
-                            self.mouse_wheel_input(delta, phase);
-                        }
+                        // Only reach here if not in Neovim mode
+                        self.mouse_wheel_input(delta, phase);
                     },
                     WindowEvent::Touch(touch) => {
                         if self.ctx.config.debug.smooth_scroll_debug {
