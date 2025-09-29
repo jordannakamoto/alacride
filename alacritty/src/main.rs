@@ -41,6 +41,7 @@ mod logging;
 mod macos;
 mod message_bar;
 mod migrate;
+mod nvim_ui;
 #[cfg(windows)]
 mod panic;
 mod renderer;

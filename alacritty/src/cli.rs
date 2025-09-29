@@ -66,6 +66,10 @@ pub struct Options {
     #[clap(long)]
     pub daemon: bool,
 
+    /// Launch in Neovim mode (embedded nvim UI).
+    #[clap(long)]
+    pub nvim_mode: bool,
+
     /// CLI options for config overrides.
     #[clap(skip)]
     pub config_options: ParsedOptions,

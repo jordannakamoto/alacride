@@ -153,12 +153,18 @@ impl Processor {
         event_loop: &ActiveEventLoop,
         window_options: WindowOptions,
     ) -> Result<(), Box<dyn Error>> {
-        let window_context = WindowContext::initial(
+        let mut window_context = WindowContext::initial(
             event_loop,
             self.proxy.clone(),
             self.config.clone(),
             window_options,
         )?;
+
+        // Enable Neovim mode by default (always on)
+        info!("Initializing Neovim mode");
+        if let Err(e) = window_context.enable_nvim_mode() {
+            error!("Failed to enable Neovim mode: {}", e);
+        }
 
         self.gl_config = Some(window_context.display.gl_context().config());
         self.windows.insert(window_context.id(), window_context);
@@ -671,6 +677,7 @@ pub struct ActionContext<'a, N, T> {
     pub event_loop: &'a ActiveEventLoop,
     pub event_proxy: &'a EventLoopProxy<Event>,
     pub scheduler: &'a mut Scheduler,
+    pub nvim_mode: &'a mut Option<crate::nvim_ui::NvimMode>,
     pub search_state: &'a mut SearchState,
     pub inline_search_state: &'a mut InlineSearchState,
     pub dirty: &'a mut bool,
@@ -752,13 +759,16 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
         ).unwrap();
 
         // Update bounds first so the renderer knows the limits
-        let term = &self.terminal;
-        let display_offset = term.grid().display_offset();
-        self.display.renderer_mut().update_smooth_scroll_bounds(
-            term.screen_lines(),
-            term.history_size(),
-        );
-        self.display.renderer_mut().set_display_offset(display_offset);
+        // Skip this in Neovim mode since we set custom bounds and don't use terminal history
+        if !self.nvim_mode.as_ref().map(|m| m.is_active()).unwrap_or(false) {
+            let term = &self.terminal;
+            let display_offset = term.grid().display_offset();
+            self.display.renderer_mut().update_smooth_scroll_bounds(
+                term.screen_lines(),
+                term.history_size(),
+            );
+            self.display.renderer_mut().set_display_offset(display_offset);
+        }
 
         // Feed raw pixels - no conversion needed
         self.display.renderer_mut().update_smooth_scroll_pixels(pixel_delta);
@@ -2004,9 +2014,50 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                         }
 
                         self.ctx.display.pending_update.set_dimensions(size);
+
+                        // Handle Neovim resize - calculate new cols/rows from the new window size
+                        if let Some(nvim_mode) = self.ctx.nvim_mode {
+                            if nvim_mode.is_active() {
+                                // Calculate new dimensions based on new window size
+                                // Use current size_info for cell dimensions, but new window size
+                                let old_size_info = &self.ctx.display.size_info;
+                                let cell_width = old_size_info.cell_width();
+                                let cell_height = old_size_info.cell_height();
+                                let padding_x = old_size_info.padding_x();
+                                let padding_y = old_size_info.padding_y();
+
+                                // Calculate usable area
+                                let width = size.width as f32 - 2.0 * padding_x;
+                                let height = size.height as f32 - 2.0 * padding_y;
+
+                                let cols = (width / cell_width).floor() as u32;
+                                let rows = (height / cell_height).floor() as u32;
+
+                                if let Err(e) = nvim_mode.resize(cols, rows) {
+                                    error!("Failed to resize Neovim to {}x{}: {}", cols, rows, e);
+                                }
+                                // Keep the old scroll region - Neovim will send updated GridScroll events
+                                // with new bounds after processing the resize
+                            }
+                        }
                     },
                     WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => {
-                        self.key_input(event);
+                        // Try Neovim mode first
+                        let mut handled = false;
+                        if let Some(nvim_mode) = self.ctx.nvim_mode {
+                            if nvim_mode.is_active() {
+                                if let Some(input_str) = crate::nvim_ui::input::key_to_nvim_input(&event, self.ctx.modifiers.state()) {
+                                    if let Err(e) = nvim_mode.send_input(&input_str) {
+                                        error!("Failed to send input to Neovim: {}", e);
+                                    }
+                                    *self.ctx.dirty = true;
+                                    handled = true;
+                                }
+                            }
+                        }
+                        if !handled {
+                            self.key_input(event);
+                        }
                     },
                     WindowEvent::ModifiersChanged(modifiers) => self.modifiers_input(modifiers),
                     WindowEvent::MouseInput { state, button, .. } => {
@@ -2022,7 +2073,38 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                             eprintln!("🔥 MOUSE WHEEL EVENT: delta={:?}, phase={:?}", delta, phase);
                         }
                         self.ctx.window().set_mouse_visible(true);
-                        self.mouse_wheel_input(delta, phase);
+
+                        // Handle Neovim mode mouse wheel separately
+                        let mut handled = false;
+                        if let Some(nvim_mode) = self.ctx.nvim_mode {
+                            if nvim_mode.is_active() {
+                                // Translate mouse wheel to Neovim scroll commands
+                                use winit::event::MouseScrollDelta;
+                                let scroll_lines = match delta {
+                                    MouseScrollDelta::LineDelta(_x, y) => y as i32,
+                                    MouseScrollDelta::PixelDelta(pos) => (pos.y / 20.0) as i32,
+                                };
+
+                                if scroll_lines != 0 {
+                                    // Send Ctrl-Y (scroll up) or Ctrl-E (scroll down) to Neovim
+                                    let command = if scroll_lines > 0 {
+                                        "<C-y>".repeat(scroll_lines.abs() as usize)
+                                    } else {
+                                        "<C-e>".repeat(scroll_lines.abs() as usize)
+                                    };
+
+                                    if let Err(e) = nvim_mode.send_input(&command) {
+                                        error!("Failed to send scroll to Neovim: {}", e);
+                                    }
+                                    *self.ctx.dirty = true;
+                                    handled = true;
+                                }
+                            }
+                        }
+
+                        if !handled {
+                            self.mouse_wheel_input(delta, phase);
+                        }
                     },
                     WindowEvent::Touch(touch) => {
                         if self.ctx.config.debug.smooth_scroll_debug {

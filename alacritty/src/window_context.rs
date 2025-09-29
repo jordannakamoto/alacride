@@ -14,7 +14,7 @@ use glutin::config::Config as GlutinConfig;
 use glutin::display::GetGlDisplay;
 #[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
 use glutin::platform::x11::X11GlConfigExt;
-use log::info;
+use log::{error, info};
 use serde_json as json;
 use winit::event::{Event as WinitEvent, Modifiers, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
@@ -43,6 +43,7 @@ use crate::logging::LOG_TARGET_IPC_CONFIG;
 use crate::message_bar::MessageBuffer;
 use crate::scheduler::Scheduler;
 use crate::{input, renderer};
+use crate::nvim_ui::NvimMode;
 
 /// Event context for one individual Alacritty window.
 pub struct WindowContext {
@@ -67,6 +68,8 @@ pub struct WindowContext {
     shell_pid: u32,
     window_config: ParsedOptions,
     config: Rc<UiConfig>,
+    /// Optional Neovim mode
+    nvim_mode: Option<NvimMode>,
 }
 
 impl WindowContext {
@@ -253,8 +256,63 @@ impl WindowContext {
             occluded: Default::default(),
             mouse: Default::default(),
             touch: Default::default(),
+            nvim_mode: None,
             dirty: Default::default(),
         })
+    }
+
+    /// Initialize Neovim mode if requested
+    pub fn enable_nvim_mode(&mut self) -> Result<(), Box<dyn Error>> {
+        let size_info = &self.display.size_info;
+        let width = size_info.columns();
+        let height = size_info.screen_lines();
+
+        info!("Enabling Neovim mode with dimensions: {}x{}", width, height);
+
+        let nvim_mode = NvimMode::new(width as u32, height as u32)
+            .map_err(|e| format!("Failed to initialize Neovim mode: {}", e))?;
+
+        // Configure renderer for Neovim scrolling (large bounds since we don't track history)
+        let renderer = self.display.renderer_mut();
+        renderer.update_smooth_scroll_bounds(height, 10000); // Large history for scrolling
+        renderer.set_display_offset(0);
+
+        self.nvim_mode = Some(nvim_mode);
+        Ok(())
+    }
+
+    /// Check if Neovim mode is active
+    pub fn is_nvim_mode(&self) -> bool {
+        self.nvim_mode.as_ref().map(|m| m.is_active()).unwrap_or(false)
+    }
+
+    /// Handle keyboard input in Neovim mode
+    /// Returns true if the event was handled, false if it should be passed to normal terminal
+    pub fn nvim_key_input(&mut self, key_event: &winit::event::KeyEvent, mods: winit::keyboard::ModifiersState) -> bool {
+        if let Some(nvim_mode) = &mut self.nvim_mode {
+            if nvim_mode.is_active() {
+                if let Some(input_str) = crate::nvim_ui::input::key_to_nvim_input(key_event, mods) {
+                    if let Err(e) = nvim_mode.send_input(&input_str) {
+                        error!("Failed to send input to Neovim: {}", e);
+                    }
+                    // Request redraw after input
+                    self.dirty = true;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Handle window resize in Neovim mode
+    pub fn nvim_resize(&mut self, width: u32, height: u32) {
+        if let Some(nvim_mode) = &mut self.nvim_mode {
+            if nvim_mode.is_active() {
+                if let Err(e) = nvim_mode.resize(width, height) {
+                    error!("Failed to resize Neovim: {}", e);
+                }
+            }
+        }
     }
 
     /// Update the terminal window to the latest config.
@@ -386,7 +444,14 @@ impl WindowContext {
             }
         }
 
-        // Redraw the window.
+        // Handle Neovim mode rendering if active
+        let is_nvim_active = self.nvim_mode.as_ref().map(|m| m.is_active()).unwrap_or(false);
+        if is_nvim_active {
+            self.draw_nvim_mode();
+            return;
+        }
+
+        // Redraw the window (normal terminal mode).
         let terminal = self.terminal.lock();
         self.display.draw(
             terminal,
@@ -407,6 +472,55 @@ impl WindowContext {
             } else {
                 self.dirty = true;
             }
+        }
+    }
+
+    /// Draw Neovim mode content
+    fn draw_nvim_mode(&mut self) {
+        // Process Neovim events and update grid
+        let size_info = self.display.size_info;
+
+        // Get pixel offset from smooth scroll animation
+        let pixel_offset = {
+            let renderer = self.display.renderer_mut();
+            if let Some(nvim_mode) = &mut self.nvim_mode {
+                nvim_mode.process_events(renderer, &size_info);
+            }
+            // Advance Neovim smooth scroll animation (pure pixel offset, no line scrolling)
+            let dt = 1.0 / 60.0; // Assume 60fps for now
+            let offset = renderer.advance_nvim_smooth_scroll(dt);
+            eprintln!("🔥 RENDER pixel_offset={}", offset);
+            offset
+        };
+
+        // Get renderable cells and active scroll region from Neovim
+        let (cells, scroll_region): (Vec<_>, _) = if let Some(nvim_mode) = &self.nvim_mode {
+            let cells = nvim_mode.get_renderable_cells().collect();
+            let scroll_region = nvim_mode.active_scroll_region();
+            (cells, scroll_region)
+        } else {
+            (vec![], None)
+        };
+
+        eprintln!("🔥 RENDER Drawing {} cells with offset {}, active_scroll_region={:?}",
+                  cells.len(), pixel_offset, scroll_region);
+
+        // Draw the cells with smooth scrolling (only active scroll region gets offset)
+        self.display.draw_nvim_cells(cells.into_iter(), pixel_offset, scroll_region);
+
+        // Request continuous redraw if smooth scrolling
+        let renderer = self.display.renderer_mut();
+        let is_animating = renderer.is_nvim_scroll_animating();
+        if is_animating {
+            eprintln!("🔥 RENDER Still animating, requesting redraw");
+            if self.display.window.has_frame {
+                self.display.window.request_redraw();
+            } else {
+                self.dirty = true;
+            }
+        } else if let Some(nvim_mode) = &mut self.nvim_mode {
+            // Animation finished, clear the active scroll region
+            nvim_mode.clear_scroll_region();
         }
     }
 
@@ -459,6 +573,7 @@ impl WindowContext {
             shell_pid: self.shell_pid,
             preserve_title: self.preserve_title,
             config: &self.config,
+            nvim_mode: &mut self.nvim_mode,
             event_proxy,
             #[cfg(target_os = "macos")]
             event_loop,

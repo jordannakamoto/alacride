@@ -955,13 +955,18 @@ impl Renderer {
 
     /// Update terminal bounds for smooth scroll renderer
     pub fn update_smooth_scroll_bounds(&mut self, screen_lines: usize, history_size: usize) {
+        eprintln!("🔥 BOUNDS: Setting screen_lines={}, history_size={}", screen_lines, history_size);
         self.terminal_screen_lines = screen_lines;
         self.terminal_history_size = history_size;
+        eprintln!("🔥 BOUNDS: After setting: terminal_screen_lines={}, terminal_history_size={}",
+                  self.terminal_screen_lines, self.terminal_history_size);
     }
 
     /// Set the current terminal display offset
     pub fn set_display_offset(&mut self, display_offset: usize) {
+        eprintln!("🔥 OFFSET: Setting display_offset={}", display_offset);
         self.terminal_display_offset = display_offset;
+        eprintln!("🔥 OFFSET: After setting: terminal_display_offset={}", self.terminal_display_offset);
     }
 
     /// Update smooth scroll based on *pixel* delta (positive = scroll up).
@@ -977,10 +982,11 @@ impl Renderer {
         let max_up_px = (max_up_lines as f32) * self.cell_height_px;
         let max_down_px = (max_down_lines as f32) * self.cell_height_px;
 
-        if self.smooth_scroll_debug {
-            eprintln!("🔥 RENDERER: pixel_delta={}, delta={}, residual={}, max_up={}, max_down={}",
-                     pixel_delta, delta, self.simple_scroll_residual, max_up_px, max_down_px);
-        }
+        eprintln!("🔥 RENDERER_PIXELS: pixel_delta={}, delta={}", pixel_delta, delta);
+        eprintln!("🔥 RENDERER_PIXELS: display_offset={}, history_size={}",
+                  self.terminal_display_offset, self.terminal_history_size);
+        eprintln!("🔥 RENDERER_PIXELS: max_up_px={}, max_down_px={}", max_up_px, max_down_px);
+        eprintln!("🔥 RENDERER_PIXELS: current total={}", self.direct_scroll_total_px);
 
         let now = Instant::now();
 
@@ -992,18 +998,23 @@ impl Renderer {
         // Direct accumulation with bounds checking
         let potential_total = self.direct_scroll_total_px + delta;
 
+        eprintln!("🔥 RENDERER_PIXELS: potential_total={}", potential_total);
+
         // Only accumulate if we're not at the boundaries
         if potential_total <= max_up_px && potential_total >= -max_down_px {
+            eprintln!("🔥 RENDERER_PIXELS: ✅ ACCEPTING scroll");
             self.direct_scroll_total_px = potential_total;
         } else if potential_total > max_up_px {
+            eprintln!("🔥 RENDERER_PIXELS: ❌ CLAMPED to max_up");
             self.direct_scroll_total_px = max_up_px;
         } else if potential_total < -max_down_px {
+            eprintln!("🔥 RENDERER_PIXELS: ❌ CLAMPED to max_down");
             self.direct_scroll_total_px = -max_down_px;
         }
 
         self.simple_scroll_residual = self.direct_scroll_total_px;
 
-        // Removed file logging
+        eprintln!("🔥 RENDERER_PIXELS: final residual={}", self.simple_scroll_residual);
 
         self.last_input_ts = Some(now);
     }
@@ -1015,7 +1026,13 @@ impl Renderer {
             self.cell_height_px = 20.0; // Fallback, will be updated in advance_smooth_scroll
         }
         let pixel_delta = line_delta * self.cell_height_px;
+        eprintln!("🔥 RENDERER update_smooth_scroll: line_delta={}, cell_height={}, pixel_delta={}",
+                  line_delta, self.cell_height_px, pixel_delta);
+        eprintln!("🔥 RENDERER before: residual={}, velocity={}",
+                  self.simple_scroll_residual, self.simple_scroll_velocity);
         self.update_smooth_scroll_pixels(pixel_delta);
+        eprintln!("🔥 RENDERER after: residual={}, velocity={}",
+                  self.simple_scroll_residual, self.simple_scroll_velocity);
     }
 
     /// Check if smooth scroll/momentum is active
@@ -1121,6 +1138,28 @@ impl Renderer {
         // Reset gesture so next deltas ramp up again.
         self.gesture_start_ts = Some(now);
         self.last_input_dir = 0.0;
+    }
+
+    /// Advance smooth scroll animation for Neovim (no line scrolling, pure pixel animation)
+    pub fn advance_nvim_smooth_scroll(&mut self, dt: f32) -> f32 {
+        // Simple exponential decay animation
+        let decay_factor = 0.85_f32.powf(dt * 60.0); // 60fps normalized
+        let current_offset = self.simple_scroll_residual;
+
+        // Animate towards zero
+        self.simple_scroll_residual *= decay_factor;
+
+        // Stop when close enough to zero
+        if self.simple_scroll_residual.abs() < 0.1 {
+            self.simple_scroll_residual = 0.0;
+        }
+
+        self.simple_scroll_residual
+    }
+
+    /// Check if Neovim smooth scroll is animating
+    pub fn is_nvim_scroll_animating(&self) -> bool {
+        self.simple_scroll_residual.abs() > 0.1
     }
 
     /// Set the viewport for cell rendering.

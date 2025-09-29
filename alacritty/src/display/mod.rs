@@ -556,6 +556,41 @@ impl Display {
         &mut self.renderer
     }
 
+    /// Draw Neovim cells with smooth scrolling
+    pub fn draw_nvim_cells<I: Iterator<Item = crate::display::content::RenderableCell>>(
+        &mut self,
+        cells: I,
+        pixel_offset: f32,
+        scroll_region: Option<(i64, i64)>,
+    ) {
+        let size_info = self.size_info;
+        let bg_color = self.colors[alacritty_terminal::vte::ansi::NamedColor::Background];
+
+        // Clear screen
+        self.renderer.clear(bg_color, 1.0);
+
+        // Split cells into scrollable and fixed regions
+        if let Some((top, bottom)) = scroll_region {
+            // We have an active scroll region - partition cells
+            let (scrollable, fixed): (Vec<_>, Vec<_>) = cells.partition(|cell| {
+                let row = cell.point.line as i64;
+                row >= top && row < bottom
+            });
+
+            // Draw scrollable cells with offset
+            self.renderer.draw_cells_smooth(&size_info, &mut self.glyph_cache, scrollable.into_iter(), pixel_offset);
+
+            // Draw fixed cells without offset
+            self.renderer.draw_cells_smooth(&size_info, &mut self.glyph_cache, fixed.into_iter(), 0.0);
+        } else {
+            // No active scroll region - draw all cells without offset
+            self.renderer.draw_cells_smooth(&size_info, &mut self.glyph_cache, cells, 0.0);
+        }
+
+        // Swap buffers
+        let _ = self.surface.swap_buffers(&self.context);
+    }
+
     pub fn make_not_current(&mut self) {
         if self.context.is_current() {
             self.context.make_not_current_in_place().expect("failed to disable context");
