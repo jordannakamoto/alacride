@@ -2078,66 +2078,51 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                         if let Some(nvim_mode) = self.ctx.nvim_mode {
                             if nvim_mode.is_active() {
                                 use winit::event::MouseScrollDelta;
-                                use std::cell::Cell;
 
-                                // Thread-local accumulator for pixel deltas
-                                thread_local! {
-                                    static SCROLL_ACCUMULATOR: Cell<f64> = Cell::new(0.0);
-                                }
-
-                                let cell_height = self.ctx.display.size_info.cell_height() as f64;
+                                let cell_height = self.ctx.display.size_info.cell_height();
 
                                 let pixel_delta = match delta {
                                     MouseScrollDelta::LineDelta(_x, y) => {
-                                        eprintln!("🔥 MOUSE LineDelta: y={}", y);
-                                        y as f64 * cell_height
+                                        y as f32 * cell_height
                                     },
                                     MouseScrollDelta::PixelDelta(pos) => {
-                                        eprintln!("🔥 MOUSE PixelDelta: y={}", pos.y);
-                                        pos.y
+                                        pos.y as f32
                                     },
                                 };
 
-                                // Accumulate pixels
-                                let accumulated = SCROLL_ACCUMULATOR.with(|acc| {
-                                    let current = acc.get() + pixel_delta;
-                                    acc.set(current);
-                                    current
-                                });
+                                // Apply smooth scroll - positive delta = scroll up (content moves down)
+                                let current_offset = self.ctx.display.renderer_mut().get_nvim_scroll_offset();
+                                let new_offset = current_offset - pixel_delta;
 
-                                eprintln!("🔥 MOUSE accumulated={}, cell_height={}", accumulated, cell_height);
+                                eprintln!("🔥 SCROLL: pixel_delta={}, current={}, new={}", pixel_delta, current_offset, new_offset);
 
-                                // Calculate how many full lines we've accumulated
-                                let scroll_lines = (accumulated / cell_height).trunc() as i32;
+                                // When we've scrolled a full line, send command to Neovim and reset
+                                let lines_scrolled = (new_offset / cell_height).trunc() as i32;
 
-                                eprintln!("🔥 MOUSE scroll_lines={}", scroll_lines);
-
-                                if scroll_lines != 0 {
-                                    // Subtract the lines we're consuming from accumulator
-                                    SCROLL_ACCUMULATOR.with(|acc| {
-                                        acc.set(accumulated - (scroll_lines as f64 * cell_height));
-                                    });
-
-                                    // Send scroll commands using <C-O> prefix for insert mode compatibility
-                                    // <C-O> executes one normal mode command from insert mode
-                                    // This allows <C-Y> and <C-E> to work in both modes
-                                    let command = if scroll_lines > 0 {
-                                        // Scroll up
-                                        (0..scroll_lines.abs()).map(|_| "<C-O><C-Y>").collect::<String>()
-                                    } else {
-                                        // Scroll down
-                                        (0..scroll_lines.abs()).map(|_| "<C-O><C-E>").collect::<String>()
-                                    };
-
-                                    eprintln!("🔥 MOUSE Sending to Neovim: {}", command);
-
-                                    if let Err(e) = nvim_mode.send_input(&command) {
-                                        error!("Failed to send scroll to Neovim: {}", e);
+                                if lines_scrolled != 0 {
+                                    eprintln!("🔥 SCROLL: Sending {} lines ({})", lines_scrolled.abs(), if lines_scrolled > 0 { "UP" } else { "DOWN" });
+                                    // Send scroll commands to Neovim
+                                    for _ in 0..lines_scrolled.abs() {
+                                        let command = if lines_scrolled > 0 {
+                                            "<C-O><C-Y>"  // Scroll up
+                                        } else {
+                                            "<C-O><C-E>"  // Scroll down
+                                        };
+                                        if let Err(e) = nvim_mode.send_input(command) {
+                                            eprintln!("Failed to send scroll: {}", e);
+                                        }
                                     }
-                                    *self.ctx.dirty = true;
+
+                                    // Keep only the fractional part
+                                    let fractional_offset = new_offset - (lines_scrolled as f32 * cell_height);
+                                    eprintln!("🔥 SCROLL: Fractional offset={}", fractional_offset);
+                                    self.ctx.display.renderer_mut().set_nvim_scroll_offset(fractional_offset);
+                                } else {
+                                    // Just accumulate the offset
+                                    self.ctx.display.renderer_mut().set_nvim_scroll_offset(new_offset);
                                 }
-                                // Always mark as handled in Neovim mode to prevent fallthrough
-                                // to terminal scrolling system
+
+                                *self.ctx.dirty = true;
                                 return;
                             }
                         }

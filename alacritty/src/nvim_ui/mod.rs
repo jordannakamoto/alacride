@@ -82,6 +82,14 @@ impl NvimClient {
         // Attach UI to Neovim
         client.attach_ui()?;
 
+        // Open sample file if it exists - use input to send ex command
+        if std::path::Path::new("sample.txt").exists() {
+            // Wait a bit for UI to be ready
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            // Send :e command followed by Enter
+            client.input(":e sample.txt\n")?;
+        }
+
         Ok(client)
     }
 
@@ -157,7 +165,13 @@ impl NvimClient {
 
     /// Attach UI to Neovim
     fn attach_ui(&mut self) -> Result<(), String> {
-        info!("Attaching UI to Neovim ({}x{})", self.width, self.height);
+        // First, disable statusline and cmdline to maximize usable space
+        self.send_command("set laststatus=0")?;  // Disable status line
+        self.send_command("set cmdheight=0")?;    // Disable command line
+
+        // Add buffer lines for smooth scrolling (1 above, 1 below)
+        let buffer_height = self.height + 2;
+        info!("Attaching UI to Neovim ({}x{} with {} buffer height)", self.width, self.height, buffer_height);
 
         // Build nvim_ui_attach request
         let request = vec![
@@ -166,7 +180,7 @@ impl NvimClient {
             Value::String("nvim_ui_attach".into()),
             Value::Array(vec![
                 Value::Integer(self.width.into()),
-                Value::Integer(self.height.into()),
+                Value::Integer(buffer_height.into()),
                 Value::Map(vec![
                     (
                         Value::String("rgb".into()),
@@ -197,6 +211,29 @@ impl NvimClient {
             .map_err(|e| format!("Failed to flush stdin: {}", e))?;
 
         debug!("UI attach request sent");
+        Ok(())
+    }
+
+    /// Send a command to Neovim
+    fn send_command(&mut self, command: &str) -> Result<(), String> {
+        let request = vec![
+            Value::Integer(0.into()),
+            Value::Integer(self.next_request_id.into()),
+            Value::String("nvim_command".into()),
+            Value::Array(vec![Value::String(command.into())]),
+        ];
+
+        self.next_request_id += 1;
+
+        let mut buf = Vec::new();
+        rmpv::encode::write_value(&mut buf, &Value::Array(request))
+            .map_err(|e| format!("Failed to encode command: {}", e))?;
+
+        self.stdin.write_all(&buf)
+            .map_err(|e| format!("Failed to write command: {}", e))?;
+        self.stdin.flush()
+            .map_err(|e| format!("Failed to flush: {}", e))?;
+
         Ok(())
     }
 
@@ -239,13 +276,16 @@ impl NvimClient {
         self.width = width;
         self.height = height;
 
+        // Add buffer lines for smooth scrolling
+        let buffer_height = height + 2;
+
         let request = vec![
             Value::Integer(0.into()),
             Value::Integer(self.next_request_id.into()),
             Value::String("nvim_ui_try_resize".into()),
             Value::Array(vec![
                 Value::Integer(width.into()),
-                Value::Integer(height.into()),
+                Value::Integer(buffer_height.into()),
             ]),
         ];
 

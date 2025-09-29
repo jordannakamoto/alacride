@@ -1149,20 +1149,15 @@ impl Renderer {
         self.direct_scroll_total_px = pixel_offset;
     }
 
+    /// Get current Neovim scroll offset
+    pub fn get_nvim_scroll_offset(&self) -> f32 {
+        self.simple_scroll_residual
+    }
+
     /// Advance smooth scroll animation for Neovim (no line scrolling, pure pixel animation)
     pub fn advance_nvim_smooth_scroll(&mut self, dt: f32) -> f32 {
-        // Faster exponential decay animation towards zero to minimize tearing
-        // Using 0.75 instead of 0.85 for quicker animation
-        let decay_factor = 0.75_f32.powf(dt * 60.0); // 60fps normalized
-
-        // Animate towards zero
-        self.simple_scroll_residual *= decay_factor;
-
-        // Stop when close enough to zero
-        if self.simple_scroll_residual.abs() < 0.1 {
-            self.simple_scroll_residual = 0.0;
-        }
-
+        // Don't decay - mouse wheel controls the offset directly
+        // Just return the current offset for rendering
         eprintln!("🔥 NVIM Scroll offset: {}", self.simple_scroll_residual);
         self.simple_scroll_residual
     }

@@ -61,31 +61,14 @@ impl NvimRendererBridge {
         renderer: &mut Renderer,
         size_info: &SizeInfo,
     ) {
-        if !self.smooth_scroll_enabled {
-            return;
-        }
-
         eprintln!("🔥 NVIM GridScroll: grid={}, top={}, bottom={}, left={}, right={}, rows={}",
                   grid, top, bottom, left, right, rows);
 
-        // Update the active scroll region - this is the region currently being animated
+        // Don't interfere with mouse wheel smooth scrolling
+        // GridScroll events update the grid content in the background,
+        // while mouse wheel controls the visual offset
+        // Just track the scroll region
         self.active_scroll_region = Some((top, bottom));
-
-        // Neovim has already updated the grid content to the NEW position
-        // We need to offset it back to the OLD position, then animate to 0
-        //
-        // If rows=-1: content scrolled up (show it at old position: +1 line = +26px offset)
-        // If rows=+1: content scrolled down (show it at old position: -1 line = -26px offset)
-        //
-        // So the initial offset is OPPOSITE of the scroll direction (no negation)
-        let pixel_offset = (rows as f32) * size_info.cell_height();
-
-        eprintln!("🔥 NVIM Setting initial offset: {}px to region ({}, {}) - will animate to 0",
-                  pixel_offset, top, bottom);
-
-        // Set the offset directly (bypasses bounds checking)
-        renderer.set_nvim_scroll_offset(pixel_offset);
-
         self.last_scroll_rows = rows;
     }
 
