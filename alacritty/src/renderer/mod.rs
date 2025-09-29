@@ -1151,8 +1151,9 @@ impl Renderer {
 
     /// Advance smooth scroll animation for Neovim (no line scrolling, pure pixel animation)
     pub fn advance_nvim_smooth_scroll(&mut self, dt: f32) -> f32 {
-        // Simple exponential decay animation towards zero
-        let decay_factor = 0.85_f32.powf(dt * 60.0); // 60fps normalized
+        // Faster exponential decay animation towards zero to minimize tearing
+        // Using 0.75 instead of 0.85 for quicker animation
+        let decay_factor = 0.75_f32.powf(dt * 60.0); // 60fps normalized
 
         // Animate towards zero
         self.simple_scroll_residual *= decay_factor;

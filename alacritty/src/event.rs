@@ -2118,14 +2118,15 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                         acc.set(accumulated - (scroll_lines as f64 * cell_height));
                                     });
 
-                                    // Send scroll commands that work in both normal and insert mode
-                                    // In insert mode: <C-X><C-Y> scrolls up, <C-X><C-E> scrolls down
-                                    // In normal mode: <C-Y> scrolls up, <C-E> scrolls down
-                                    // We'll use the insert-mode compatible version which works in both
+                                    // Send scroll commands using <C-O> prefix for insert mode compatibility
+                                    // <C-O> executes one normal mode command from insert mode
+                                    // This allows <C-Y> and <C-E> to work in both modes
                                     let command = if scroll_lines > 0 {
-                                        "<C-X><C-Y>".repeat(scroll_lines.abs() as usize)
+                                        // Scroll up
+                                        (0..scroll_lines.abs()).map(|_| "<C-O><C-Y>").collect::<String>()
                                     } else {
-                                        "<C-X><C-E>".repeat(scroll_lines.abs() as usize)
+                                        // Scroll down
+                                        (0..scroll_lines.abs()).map(|_| "<C-O><C-E>").collect::<String>()
                                     };
 
                                     eprintln!("🔥 MOUSE Sending to Neovim: {}", command);
