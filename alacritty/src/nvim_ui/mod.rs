@@ -11,6 +11,20 @@
 //! - Translates events to Alacride's rendering system
 //! - Integrates with smooth scroll renderer for buttery animations
 
+/// Enable debug logging for Neovim UI (set to false to disable 🔥 logs)
+pub const NVIM_DEBUG: bool = false;
+
+/// Debug macro - only prints if NVIM_DEBUG is enabled
+/// Use this instead of eprintln! for all Neovim-related debug logs
+#[macro_export]
+macro_rules! nvim_debug {
+    ($($arg:tt)*) => {
+        if $crate::nvim_ui::NVIM_DEBUG {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
 use std::io::{BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -241,7 +255,7 @@ impl NvimClient {
 
     /// Send input to Neovim
     pub fn input(&mut self, input: &str) -> Result<(), String> {
-        eprintln!("🔥 NVIM Sending input: {:?}", input);
+        nvim_debug!("🔥 NVIM Sending input: {:?}", input);
 
         let request = vec![
             Value::Integer(0.into()),

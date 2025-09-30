@@ -84,7 +84,7 @@ impl NvimRendererBridge {
         renderer: &mut Renderer,
         size_info: &SizeInfo,
     ) {
-        eprintln!("🔥 NVIM GridScroll: grid={}, top={}, bottom={}, left={}, right={}, rows={}",
+        nvim_debug!("🔥 NVIM GridScroll: grid={}, top={}, bottom={}, left={}, right={}, rows={}",
                   grid, top, bottom, left, right, rows);
 
         // Don't interfere with mouse wheel smooth scrolling

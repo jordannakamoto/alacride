@@ -489,7 +489,7 @@ impl WindowContext {
             // Advance Neovim smooth scroll animation (pure pixel offset, no line scrolling)
             let dt = 1.0 / 60.0; // Assume 60fps for now
             let offset = renderer.advance_nvim_smooth_scroll(dt);
-            eprintln!("🔥 RENDER pixel_offset={}", offset);
+            crate::nvim_debug!("🔥 RENDER pixel_offset={}", offset);
             offset
         };
 
@@ -502,7 +502,7 @@ impl WindowContext {
             (vec![], None)
         };
 
-        eprintln!("🔥 RENDER Drawing {} cells with offset {}, active_scroll_region={:?}",
+        crate::nvim_debug!("🔥 RENDER Drawing {} cells with offset {}, active_scroll_region={:?}",
                   cells.len(), pixel_offset, scroll_region);
 
         // Draw the cells with smooth scrolling (only active scroll region gets offset)
@@ -512,7 +512,7 @@ impl WindowContext {
         let renderer = self.display.renderer_mut();
         let is_animating = renderer.is_nvim_scroll_animating();
         if is_animating {
-            eprintln!("🔥 RENDER Still animating, requesting redraw");
+            crate::nvim_debug!("🔥 RENDER Still animating, requesting redraw");
             if self.display.window.has_frame {
                 self.display.window.request_redraw();
             } else {

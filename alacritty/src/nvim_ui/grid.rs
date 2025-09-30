@@ -296,7 +296,7 @@ impl Grid {
             .collect();
 
         let result = line_num_text.trim().parse().ok();
-        eprintln!("🔥 BOTTOM LINE: checking row[{}] (height={}, total rows={}), text='{}' -> {:?}",
+        nvim_debug!("🔥 BOTTOM LINE: checking row[{}] (height={}, total rows={}), text='{}' -> {:?}",
                   last_visible_row_index, self.height, self.height, line_num_text, result);
         result
     }
@@ -327,7 +327,7 @@ impl Grid {
 
         let is_empty = line_num_text.trim().parse::<u32>().is_err();
         if is_empty {
-            eprintln!("🔥 BOTTOM CHECK: Last row text=[{}], is_empty={}", line_num_text, is_empty);
+            nvim_debug!("🔥 BOTTOM CHECK: Last row text=[{}], is_empty={}", line_num_text, is_empty);
         }
         is_empty
     }

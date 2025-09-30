@@ -2070,7 +2070,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     },
                     WindowEvent::MouseWheel { delta, phase, .. } => {
                         if self.ctx.config.debug.smooth_scroll_debug {
-                            eprintln!("🔥 MOUSE WHEEL EVENT: delta={:?}, phase={:?}", delta, phase);
+                            crate::nvim_debug!("🔥 MOUSE WHEEL EVENT: delta={:?}, phase={:?}", delta, phase);
                         }
                         self.ctx.window().set_mouse_visible(true);
 
@@ -2102,14 +2102,14 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                 let at_bottom = nvim_mode.is_at_buffer_bottom();
 
                                 if at_top && pixel_delta < 0.0 {
-                                    eprintln!("🔥 SCROLL: At top boundary, killing momentum");
+                                    crate::nvim_debug!("🔥 SCROLL: At top boundary, killing momentum");
                                     self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
                                     *self.ctx.dirty = true;
                                     return;
                                 }
 
                                 if at_bottom && pixel_delta > 0.0 {
-                                    eprintln!("🔥 SCROLL: At bottom boundary, killing downward momentum (pixel_delta={})", pixel_delta);
+                                    crate::nvim_debug!("🔥 SCROLL: At bottom boundary, killing downward momentum (pixel_delta={})", pixel_delta);
                                     self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
                                     *self.ctx.dirty = true;
                                     return;
@@ -2119,7 +2119,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                 let current_offset = self.ctx.display.renderer_mut().get_nvim_scroll_offset();
                                 let new_offset = current_offset - pixel_delta;
 
-                                eprintln!("🔥 SCROLL: pixel_delta={}, current={}, new={}, at_top={}",
+                                crate::nvim_debug!("🔥 SCROLL: pixel_delta={}, current={}, new={}, at_top={}",
                                          pixel_delta, current_offset, new_offset, at_top);
 
                                 // When we've scrolled a full line, send command to Neovim and reset
@@ -2130,7 +2130,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                     let at_bottom = nvim_mode.is_at_buffer_bottom();
                                     if at_bottom && lines_scrolled < 0 {
                                         // Already at bottom and trying to scroll down - reject the scroll
-                                        eprintln!("🔥 SCROLL: At bottom boundary, rejecting scroll down");
+                                        crate::nvim_debug!("🔥 SCROLL: At bottom boundary, rejecting scroll down");
                                         self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
                                         *self.ctx.dirty = true;
                                         return;
@@ -2138,7 +2138,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
 
                                     let top_line_before = nvim_mode.get_top_line_number();
 
-                                    eprintln!("🔥 SCROLL: Sending {} lines ({}), top_line_before={:?}",
+                                    crate::nvim_debug!("🔥 SCROLL: Sending {} lines ({}), top_line_before={:?}",
                                              lines_scrolled.abs(), if lines_scrolled > 0 { "UP" } else { "DOWN" },
                                              top_line_before);
 
@@ -2160,7 +2160,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
 
                                     // Keep only the fractional part
                                     let fractional_offset = new_offset - (lines_scrolled as f32 * cell_height);
-                                    eprintln!("🔥 SCROLL: Fractional offset={}", fractional_offset);
+                                    crate::nvim_debug!("🔥 SCROLL: Fractional offset={}", fractional_offset);
                                     self.ctx.display.renderer_mut().set_nvim_scroll_offset(fractional_offset);
                                 } else {
                                     // Accumulating offset (not yet a full line)
@@ -2169,11 +2169,11 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
 
                                     // If at top and trying to scroll up (positive offset), reset it
                                     if at_top && new_offset > 0.0 {
-                                        eprintln!("🔥 SCROLL: At top boundary while accumulating ({}), resetting", new_offset);
+                                        crate::nvim_debug!("🔥 SCROLL: At top boundary while accumulating ({}), resetting", new_offset);
                                         self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
                                     } else if at_bottom {
                                         // At bottom - don't allow ANY negative offset
-                                        eprintln!("🔥 SCROLL: At bottom boundary, resetting offset (was {})", new_offset);
+                                        crate::nvim_debug!("🔥 SCROLL: At bottom boundary, resetting offset (was {})", new_offset);
                                         self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
                                     } else {
                                         // Not at boundary, allow accumulation
@@ -2191,7 +2191,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     },
                     WindowEvent::Touch(touch) => {
                         if self.ctx.config.debug.smooth_scroll_debug {
-                            eprintln!("🔥 GOT TOUCH EVENT: {:?}", touch);
+                            crate::nvim_debug!("🔥 GOT TOUCH EVENT: {:?}", touch);
                         }
                         self.touch(touch);
                     },

@@ -955,18 +955,18 @@ impl Renderer {
 
     /// Update terminal bounds for smooth scroll renderer
     pub fn update_smooth_scroll_bounds(&mut self, screen_lines: usize, history_size: usize) {
-        eprintln!("🔥 BOUNDS: Setting screen_lines={}, history_size={}", screen_lines, history_size);
+        crate::nvim_debug!("🔥 BOUNDS: Setting screen_lines={}, history_size={}", screen_lines, history_size);
         self.terminal_screen_lines = screen_lines;
         self.terminal_history_size = history_size;
-        eprintln!("🔥 BOUNDS: After setting: terminal_screen_lines={}, terminal_history_size={}",
+        crate::nvim_debug!("🔥 BOUNDS: After setting: terminal_screen_lines={}, terminal_history_size={}",
                   self.terminal_screen_lines, self.terminal_history_size);
     }
 
     /// Set the current terminal display offset
     pub fn set_display_offset(&mut self, display_offset: usize) {
-        eprintln!("🔥 OFFSET: Setting display_offset={}", display_offset);
+        crate::nvim_debug!("🔥 OFFSET: Setting display_offset={}", display_offset);
         self.terminal_display_offset = display_offset;
-        eprintln!("🔥 OFFSET: After setting: terminal_display_offset={}", self.terminal_display_offset);
+        crate::nvim_debug!("🔥 OFFSET: After setting: terminal_display_offset={}", self.terminal_display_offset);
     }
 
     /// Update smooth scroll based on *pixel* delta (positive = scroll up).
@@ -982,11 +982,11 @@ impl Renderer {
         let max_up_px = (max_up_lines as f32) * self.cell_height_px;
         let max_down_px = (max_down_lines as f32) * self.cell_height_px;
 
-        eprintln!("🔥 RENDERER_PIXELS: pixel_delta={}, delta={}", pixel_delta, delta);
-        eprintln!("🔥 RENDERER_PIXELS: display_offset={}, history_size={}",
+        crate::nvim_debug!("🔥 RENDERER_PIXELS: pixel_delta={}, delta={}", pixel_delta, delta);
+        crate::nvim_debug!("🔥 RENDERER_PIXELS: display_offset={}, history_size={}",
                   self.terminal_display_offset, self.terminal_history_size);
-        eprintln!("🔥 RENDERER_PIXELS: max_up_px={}, max_down_px={}", max_up_px, max_down_px);
-        eprintln!("🔥 RENDERER_PIXELS: current total={}", self.direct_scroll_total_px);
+        crate::nvim_debug!("🔥 RENDERER_PIXELS: max_up_px={}, max_down_px={}", max_up_px, max_down_px);
+        crate::nvim_debug!("🔥 RENDERER_PIXELS: current total={}", self.direct_scroll_total_px);
 
         let now = Instant::now();
 
@@ -998,23 +998,23 @@ impl Renderer {
         // Direct accumulation with bounds checking
         let potential_total = self.direct_scroll_total_px + delta;
 
-        eprintln!("🔥 RENDERER_PIXELS: potential_total={}", potential_total);
+        crate::nvim_debug!("🔥 RENDERER_PIXELS: potential_total={}", potential_total);
 
         // Only accumulate if we're not at the boundaries
         if potential_total <= max_up_px && potential_total >= -max_down_px {
-            eprintln!("🔥 RENDERER_PIXELS: ✅ ACCEPTING scroll");
+            crate::nvim_debug!("🔥 RENDERER_PIXELS: ✅ ACCEPTING scroll");
             self.direct_scroll_total_px = potential_total;
         } else if potential_total > max_up_px {
-            eprintln!("🔥 RENDERER_PIXELS: ❌ CLAMPED to max_up");
+            crate::nvim_debug!("🔥 RENDERER_PIXELS: ❌ CLAMPED to max_up");
             self.direct_scroll_total_px = max_up_px;
         } else if potential_total < -max_down_px {
-            eprintln!("🔥 RENDERER_PIXELS: ❌ CLAMPED to max_down");
+            crate::nvim_debug!("🔥 RENDERER_PIXELS: ❌ CLAMPED to max_down");
             self.direct_scroll_total_px = -max_down_px;
         }
 
         self.simple_scroll_residual = self.direct_scroll_total_px;
 
-        eprintln!("🔥 RENDERER_PIXELS: final residual={}", self.simple_scroll_residual);
+        crate::nvim_debug!("🔥 RENDERER_PIXELS: final residual={}", self.simple_scroll_residual);
 
         self.last_input_ts = Some(now);
     }
@@ -1026,12 +1026,12 @@ impl Renderer {
             self.cell_height_px = 20.0; // Fallback, will be updated in advance_smooth_scroll
         }
         let pixel_delta = line_delta * self.cell_height_px;
-        eprintln!("🔥 RENDERER update_smooth_scroll: line_delta={}, cell_height={}, pixel_delta={}",
+        crate::nvim_debug!("🔥 RENDERER update_smooth_scroll: line_delta={}, cell_height={}, pixel_delta={}",
                   line_delta, self.cell_height_px, pixel_delta);
-        eprintln!("🔥 RENDERER before: residual={}, velocity={}",
+        crate::nvim_debug!("🔥 RENDERER before: residual={}, velocity={}",
                   self.simple_scroll_residual, self.simple_scroll_velocity);
         self.update_smooth_scroll_pixels(pixel_delta);
-        eprintln!("🔥 RENDERER after: residual={}, velocity={}",
+        crate::nvim_debug!("🔥 RENDERER after: residual={}, velocity={}",
                   self.simple_scroll_residual, self.simple_scroll_velocity);
     }
 
@@ -1144,7 +1144,7 @@ impl Renderer {
     /// This is used when Neovim has already scrolled the content and we just
     /// want to temporarily show it at the old position, then animate to 0
     pub fn set_nvim_scroll_offset(&mut self, pixel_offset: f32) {
-        eprintln!("🔥 NVIM Setting scroll offset: {}", pixel_offset);
+        crate::nvim_debug!("🔥 NVIM Setting scroll offset: {}", pixel_offset);
         self.simple_scroll_residual = pixel_offset;
         self.direct_scroll_total_px = pixel_offset;
     }
@@ -1158,7 +1158,7 @@ impl Renderer {
     pub fn advance_nvim_smooth_scroll(&mut self, dt: f32) -> f32 {
         // Don't decay - mouse wheel controls the offset directly
         // Just return the current offset for rendering
-        eprintln!("🔥 NVIM Scroll offset: {}", self.simple_scroll_residual);
+        crate::nvim_debug!("🔥 NVIM Scroll offset: {}", self.simple_scroll_residual);
         self.simple_scroll_residual
     }
 

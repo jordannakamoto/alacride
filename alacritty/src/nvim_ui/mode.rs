@@ -49,16 +49,16 @@ impl NvimMode {
         let events = self.client.poll_events();
 
         if !events.is_empty() {
-            eprintln!("🔥 NVIM Processing {} events", events.len());
+            nvim_debug!("🔥 NVIM Processing {} events", events.len());
         }
 
         for event in events {
             match event {
                 NvimEvent::Redraw(redraw_events) => {
-                    eprintln!("🔥 NVIM Redraw batch with {} events", redraw_events.len());
+                    nvim_debug!("🔥 NVIM Redraw batch with {} events", redraw_events.len());
                     for redraw_event in redraw_events {
                         if matches!(redraw_event, RedrawEvent::GridScroll { .. }) {
-                            eprintln!("🔥 NVIM Found GridScroll event!");
+                            nvim_debug!("🔥 NVIM Found GridScroll event!");
                         }
                         self.handle_redraw_event(&redraw_event, renderer, size_info);
                     }
@@ -69,7 +69,7 @@ impl NvimMode {
                     if let Some(result) = &response.result {
                         if let Some(line_num) = result.as_u64() {
                             self.buffer_last_line = Some(line_num as u32);
-                            eprintln!("🔥 NVIM Buffer last line: {}", line_num);
+                            nvim_debug!("🔥 NVIM Buffer last line: {}", line_num);
                         }
                     }
                 }
@@ -273,16 +273,16 @@ impl NvimMode {
         let result = if let (Some(buffer_last), Some(visible_top)) = (buffer_last, visible_top) {
             // We're at bottom if the top visible row shows the buffer's last line (or beyond)
             let at_bottom = visible_top >= buffer_last;
-            eprintln!("🔥 BOTTOM CHECK: visible_top={}, buffer_last={}, at_bottom={}",
+            nvim_debug!("🔥 BOTTOM CHECK: visible_top={}, buffer_last={}, at_bottom={}",
                       visible_top, buffer_last, at_bottom);
             at_bottom
         } else if visible_top.is_none() {
             // Can't parse line number from top row
-            eprintln!("🔥 BOTTOM CHECK: Top row is blank (visible_top=None) - AT BOTTOM");
+            nvim_debug!("🔥 BOTTOM CHECK: Top row is blank (visible_top=None) - AT BOTTOM");
             true
         } else {
             // Don't have buffer info yet
-            eprintln!("🔥 BOTTOM CHECK: No buffer info yet - visible_top={:?}, buffer_last={:?}",
+            nvim_debug!("🔥 BOTTOM CHECK: No buffer info yet - visible_top={:?}, buffer_last={:?}",
                       visible_top, buffer_last);
             false
         };

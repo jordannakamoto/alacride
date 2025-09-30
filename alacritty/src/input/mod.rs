@@ -917,7 +917,7 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
                 *touch_purpose = TouchPurpose::Scroll(touch);
 
                 if self.ctx.config().debug.smooth_scroll_debug {
-                    eprintln!("🔥 TOUCH SCROLL: delta_y={}", delta_y);
+                    crate::nvim_debug!("🔥 TOUCH SCROLL: delta_y={}", delta_y);
                 }
                 // Use a fixed scroll factor for touchscreens, to accurately track finger motion.
                 self.scroll_terminal(0., delta_y, 1.0);
