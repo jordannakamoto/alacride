@@ -583,8 +583,8 @@ impl Display {
             // Draw fixed cells without offset
             self.renderer.draw_cells_smooth(&size_info, &mut self.glyph_cache, fixed.into_iter(), 0.0);
         } else {
-            // No active scroll region - draw all cells without offset
-            self.renderer.draw_cells_smooth(&size_info, &mut self.glyph_cache, cells, 0.0);
+            // No active scroll region - apply offset to all cells for smooth scrolling
+            self.renderer.draw_cells_smooth(&size_info, &mut self.glyph_cache, cells, pixel_offset);
         }
 
         // Swap buffers

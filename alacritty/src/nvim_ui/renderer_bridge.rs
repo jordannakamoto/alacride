@@ -17,6 +17,18 @@ pub struct NvimRendererBridge {
     last_scroll_rows: i64,
     /// Active scroll region bounds (top row, bottom row) - the region currently being animated
     active_scroll_region: Option<(i64, i64)>,
+    /// Current cursor row position (for detecting scroll boundaries)
+    cursor_row: u64,
+    /// Previous cursor row (to detect if scroll actually happened)
+    prev_cursor_row: u64,
+    /// Whether we received a grid_scroll event in this frame
+    received_grid_scroll: bool,
+    /// Whether we're currently at the bottom boundary
+    at_bottom_boundary: bool,
+    /// Last seen top line number (for detecting when scroll is stuck)
+    last_top_line: Option<u32>,
+    /// Number of consecutive scroll attempts that didn't move top line
+    stuck_scroll_count: u32,
 }
 
 impl NvimRendererBridge {
@@ -26,6 +38,12 @@ impl NvimRendererBridge {
             smooth_scroll_enabled: true,
             last_scroll_rows: 0,
             active_scroll_region: None,
+            cursor_row: 0,
+            prev_cursor_row: 0,
+            received_grid_scroll: false,
+            at_bottom_boundary: false,
+            last_top_line: None,
+            stuck_scroll_count: 0,
         }
     }
 
@@ -38,7 +56,12 @@ impl NvimRendererBridge {
     ) {
         match event {
             RedrawEvent::GridScroll { grid, top, bottom, left, right, rows, cols } => {
+                self.received_grid_scroll = true;
                 self.handle_scroll(*grid, *top, *bottom, *left, *right, *rows, *cols, renderer, size_info);
+            }
+            RedrawEvent::GridCursorGoto { row, .. } => {
+                self.prev_cursor_row = self.cursor_row;
+                self.cursor_row = *row;
             }
             RedrawEvent::Flush => {
                 // Reset aggregation on flush
@@ -92,6 +115,49 @@ impl NvimRendererBridge {
     /// Clear the active scroll region (called when animation completes or window resizes)
     pub fn clear_scroll_region(&mut self) {
         self.active_scroll_region = None;
+    }
+
+    /// Get current cursor row
+    pub fn cursor_row(&self) -> u64 {
+        self.cursor_row
+    }
+
+    /// Check if we're likely at a scroll boundary (top or bottom of file)
+    /// by seeing if the cursor didn't move after a scroll attempt
+    pub fn at_scroll_boundary(&self) -> bool {
+        // If cursor is at row 0 or 1, likely at top of file
+        // The cursor position doesn't change much when hitting boundaries
+        self.cursor_row <= 1
+    }
+
+    /// Check if we received a GridScroll event this frame
+    pub fn did_grid_scroll(&self) -> bool {
+        self.received_grid_scroll
+    }
+
+    /// Reset the GridScroll flag (call after processing a frame)
+    pub fn reset_grid_scroll_flag(&mut self) {
+        self.received_grid_scroll = false;
+    }
+
+    /// Set the bottom boundary flag
+    pub fn set_at_bottom_boundary(&mut self, at_bottom: bool) {
+        self.at_bottom_boundary = at_bottom;
+    }
+
+    /// Check if we're at the bottom boundary
+    pub fn is_at_bottom_boundary(&self) -> bool {
+        self.at_bottom_boundary
+    }
+
+    /// Get last top line
+    pub fn get_last_top_line(&self) -> Option<u32> {
+        self.last_top_line
+    }
+
+    /// Set last top line
+    pub fn set_last_top_line(&mut self, line: Option<u32>) {
+        self.last_top_line = line;
     }
 }
 

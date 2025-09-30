@@ -168,6 +168,8 @@ impl NvimClient {
         // First, disable statusline and cmdline to maximize usable space
         self.send_command("set laststatus=0")?;  // Disable status line
         self.send_command("set cmdheight=0")?;    // Disable command line
+        self.send_command("set number")?;         // Enable line numbers for boundary detection
+        self.send_command("set fillchars=eob:\\ ")?;  // Hide tildes at end of buffer
 
         // Add buffer lines for smooth scrolling (1 above, 1 below)
         let buffer_height = self.height + 2;
@@ -260,6 +262,31 @@ impl NvimClient {
             .map_err(|e| format!("Failed to flush: {}", e))?;
 
         Ok(())
+    }
+
+    /// Evaluate a Vim expression (returns request ID for tracking response)
+    pub fn eval_expr(&mut self, expr: &str) -> Result<u64, String> {
+        let request_id = self.next_request_id;
+
+        let request = vec![
+            Value::Integer(0.into()),
+            Value::Integer(request_id.into()),
+            Value::String("nvim_eval".into()),
+            Value::Array(vec![Value::String(expr.into())]),
+        ];
+
+        self.next_request_id += 1;
+
+        let mut buf = Vec::new();
+        rmpv::encode::write_value(&mut buf, &Value::Array(request))
+            .map_err(|e| format!("Failed to encode eval: {}", e))?;
+
+        self.stdin.write_all(&buf)
+            .map_err(|e| format!("Failed to write eval: {}", e))?;
+        self.stdin.flush()
+            .map_err(|e| format!("Failed to flush: {}", e))?;
+
+        Ok(request_id)
     }
 
     /// Poll for events from Neovim

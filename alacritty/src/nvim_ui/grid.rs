@@ -239,6 +239,101 @@ impl Grid {
         (self.cursor_row, self.cursor_col)
     }
 
+    /// Get the top line number from the grid (assumes :set number is enabled)
+    /// Returns None if can't parse a line number
+    pub fn get_top_line_number(&self) -> Option<u32> {
+        if self.height == 0 || self.width < 5 {
+            return None;
+        }
+
+        // Line numbers are typically in the first ~5 columns
+        let line_num_text: String = (0..5.min(self.width))
+            .filter_map(|col| {
+                let idx = col;  // First row
+                if idx < self.cells.len() {
+                    let ch = self.cells[idx].character;
+                    if ch.is_ascii_digit() || ch == ' ' {
+                        Some(ch)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        line_num_text.trim().parse().ok()
+    }
+
+    /// Get the bottom visible line number from the grid (assumes :set number is enabled)
+    /// This just parses the line number from any visible row with content
+    pub fn get_bottom_line_number(&self) -> Option<u32> {
+        if self.height < 2 || self.width < 5 {
+            return None;
+        }
+
+        // Check the last few rows to find any valid line number
+        // (we have buffer lines so not all rows may have content)
+        for offset in 0..3.min(self.height) {
+            let row = self.height - 1 - offset;
+
+            let line_num_text: String = (0..5.min(self.width))
+                .filter_map(|col| {
+                    let idx = row * self.width + col;
+                    if idx < self.cells.len() {
+                        let ch = self.cells[idx].character;
+                        if ch.is_ascii_digit() || ch == ' ' {
+                            Some(ch)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if let Ok(num) = line_num_text.trim().parse::<u32>() {
+                return Some(num);
+            }
+        }
+
+        None
+    }
+
+    /// Check if the last row has no line number (we're past the end of content)
+    pub fn last_row_is_empty(&self) -> bool {
+        if self.height < 1 {
+            return false;
+        }
+
+        // Check if last row has a line number
+        let last_row = self.height - 1;
+        let line_num_text: String = (0..5.min(self.width))
+            .filter_map(|col| {
+                let idx = last_row * self.width + col;
+                if idx < self.cells.len() {
+                    let ch = self.cells[idx].character;
+                    if ch.is_ascii_digit() || ch == ' ' {
+                        Some(ch)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let is_empty = line_num_text.trim().parse::<u32>().is_err();
+        if is_empty {
+            eprintln!("🔥 BOTTOM CHECK: Last row text=[{}], is_empty={}", line_num_text, is_empty);
+        }
+        is_empty
+    }
+
+
     /// Get a cell at the given position
     pub fn get_cell(&self, row: usize, col: usize) -> Option<&GridCell> {
         if row >= self.height || col >= self.width {

@@ -22,6 +22,8 @@ pub struct NvimMode {
     renderer_bridge: NvimRendererBridge,
     /// Whether the mode is active
     active: bool,
+    /// Last line in buffer (from line('$')) - used for bottom boundary detection
+    buffer_last_line: Option<u32>,
 }
 
 impl NvimMode {
@@ -38,6 +40,7 @@ impl NvimMode {
             grid,
             renderer_bridge,
             active: true,
+            buffer_last_line: None,
         })
     }
 
@@ -62,6 +65,13 @@ impl NvimMode {
                 }
                 NvimEvent::Response(response) => {
                     debug!("Received response: {:?}", response);
+                    // Check if this is a response to our line('$') query
+                    if let Some(result) = &response.result {
+                        if let Some(line_num) = result.as_u64() {
+                            self.buffer_last_line = Some(line_num as u32);
+                            eprintln!("🔥 NVIM Buffer last line: {}", line_num);
+                        }
+                    }
                 }
                 NvimEvent::Request(request) => {
                     debug!("Received request: {:?}", request);
@@ -111,6 +121,8 @@ impl NvimMode {
                 if *grid == 1 {
                     self.grid.set_cursor(*row as usize, *col as usize);
                 }
+                // Forward to renderer bridge for cursor tracking
+                self.renderer_bridge.process_event(event, renderer, size_info);
             }
             RedrawEvent::DefaultColorsSet { fg, bg, sp } => {
                 self.grid.set_default_colors(*fg, *bg, *sp);
@@ -192,5 +204,85 @@ impl NvimMode {
     /// Clear the scroll region (called on resize)
     pub fn clear_scroll_region(&mut self) {
         self.renderer_bridge.clear_scroll_region();
+    }
+
+    /// Check if we're at a scroll boundary (top or bottom of file)
+    pub fn at_scroll_boundary(&self) -> bool {
+        self.renderer_bridge.at_scroll_boundary()
+    }
+
+    /// Check if Neovim sent a GridScroll event (indicates scroll actually happened)
+    pub fn did_grid_scroll(&self) -> bool {
+        self.renderer_bridge.did_grid_scroll()
+    }
+
+    /// Reset the GridScroll flag after checking
+    pub fn reset_grid_scroll_flag(&mut self) {
+        self.renderer_bridge.reset_grid_scroll_flag();
+    }
+
+    /// Get the top line number from grid (for boundary detection)
+    pub fn get_top_line_number(&self) -> Option<u32> {
+        self.grid.get_top_line_number()
+    }
+
+    /// Get the bottom line number from grid (for boundary detection)
+    pub fn get_bottom_line_number(&self) -> Option<u32> {
+        self.grid.get_bottom_line_number()
+    }
+
+    /// Set the bottom boundary flag
+    pub fn set_at_bottom_boundary(&mut self, at_bottom: bool) {
+        self.renderer_bridge.set_at_bottom_boundary(at_bottom);
+    }
+
+    /// Check if we're at the bottom boundary
+    pub fn is_at_bottom_boundary(&self) -> bool {
+        self.renderer_bridge.is_at_bottom_boundary()
+    }
+
+    /// Check if the last row is empty (no line number)
+    pub fn last_row_is_empty(&self) -> bool {
+        self.grid.last_row_is_empty()
+    }
+
+    /// Get last top line
+    pub fn get_last_top_line(&self) -> Option<u32> {
+        self.renderer_bridge.get_last_top_line()
+    }
+
+    /// Set last top line
+    pub fn set_last_top_line(&mut self, line: Option<u32>) {
+        self.renderer_bridge.set_last_top_line(line);
+    }
+
+    /// Query the buffer's last line using Neovim API
+    /// This updates the internal buffer_last_line cache
+    pub fn query_buffer_last_line(&mut self) -> Result<(), String> {
+        // Query line('$') to get the last line in buffer
+        self.client.eval_expr("line('$')")?;
+        Ok(())
+    }
+
+    /// Check if we're at the bottom by comparing visible bottom line with buffer last line
+    pub fn is_at_buffer_bottom(&self) -> bool {
+        let visible_bottom = self.grid.get_bottom_line_number();
+        let buffer_last = self.buffer_last_line;
+
+        // Compare the bottom visible line number with the buffer's last line
+        let result = if let (Some(visible_bottom), Some(buffer_last)) = (visible_bottom, buffer_last) {
+            let at_bottom = visible_bottom >= buffer_last;
+            eprintln!("🔥 BOTTOM CHECK: visible_bottom={}, buffer_last={}, at_bottom={}",
+                      visible_bottom, buffer_last, at_bottom);
+            at_bottom
+        } else {
+            // If we can't determine, fall back to grid detection
+            let fallback = self.grid.get_bottom_line_number().is_none();
+            eprintln!("🔥 BOTTOM CHECK: fallback mode - visible_bottom={:?}, buffer_last={:?}, result={}",
+                      visible_bottom, buffer_last, fallback);
+            fallback
+        };
+
+        result
     }
 }
