@@ -264,26 +264,26 @@ impl NvimMode {
         Ok(())
     }
 
-    /// Check if we're at the bottom - buffer's last line must be at the bottom of viewport
+    /// Check if we're at the bottom - stop when buffer's last line is at the top of viewport
     pub fn is_at_buffer_bottom(&self) -> bool {
-        let visible_bottom = self.grid.get_bottom_line_number();
+        let visible_top = self.grid.get_top_line_number();
         let buffer_last = self.buffer_last_line;
 
-        // Check if buffer's last line is at the bottom of the screen (or past it)
-        let result = if let (Some(buffer_last), Some(visible_bottom)) = (buffer_last, visible_bottom) {
-            // We're at bottom if the last visible row shows the buffer's last line (or beyond)
-            let at_bottom = visible_bottom >= buffer_last;
-            eprintln!("🔥 BOTTOM CHECK: visible_bottom={}, buffer_last={}, at_bottom={}",
-                      visible_bottom, buffer_last, at_bottom);
+        // Check if buffer's last line is at or above the top of the screen
+        let result = if let (Some(buffer_last), Some(visible_top)) = (buffer_last, visible_top) {
+            // We're at bottom if the top visible row shows the buffer's last line (or beyond)
+            let at_bottom = visible_top >= buffer_last;
+            eprintln!("🔥 BOTTOM CHECK: visible_top={}, buffer_last={}, at_bottom={}",
+                      visible_top, buffer_last, at_bottom);
             at_bottom
-        } else if visible_bottom.is_none() {
-            // Can't parse line number from bottom row - we've scrolled past content
-            eprintln!("🔥 BOTTOM CHECK: Bottom row is blank (visible_bottom=None) - AT BOTTOM");
+        } else if visible_top.is_none() {
+            // Can't parse line number from top row
+            eprintln!("🔥 BOTTOM CHECK: Top row is blank (visible_top=None) - AT BOTTOM");
             true
         } else {
             // Don't have buffer info yet
-            eprintln!("🔥 BOTTOM CHECK: No buffer info yet - visible_bottom={:?}, buffer_last={:?}",
-                      visible_bottom, buffer_last);
+            eprintln!("🔥 BOTTOM CHECK: No buffer info yet - visible_top={:?}, buffer_last={:?}",
+                      visible_top, buffer_last);
             false
         };
 
