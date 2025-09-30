@@ -64,14 +64,14 @@ impl NvimClient {
     pub fn spawn(width: u32, height: u32) -> Result<Self, String> {
         info!("Spawning embedded Neovim instance ({}x{})", width, height);
 
-        // Spawn nvim with --embed flag
-        let mut child = Command::new("nvim")
+        // Spawn acvim with --embed flag
+        let mut child = Command::new("acvim")
             .arg("--embed")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .map_err(|e| format!("Failed to spawn nvim: {}", e))?;
+            .map_err(|e| format!("Failed to spawn acvim: {}", e))?;
 
         let stdin = child.stdin.take().ok_or("Failed to open nvim stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to open nvim stdout")?;
@@ -301,6 +301,29 @@ impl NvimClient {
             .map_err(|e| format!("Failed to flush: {}", e))?;
 
         Ok(request_id)
+    }
+
+    /// Execute a Vim command directly via RPC (doesn't trigger keymaps)
+    pub fn exec_command(&mut self, command: &str) -> Result<(), String> {
+        let request = vec![
+            Value::Integer(0.into()),
+            Value::Integer(self.next_request_id.into()),
+            Value::String("nvim_command".into()),
+            Value::Array(vec![Value::String(command.into())]),
+        ];
+
+        self.next_request_id += 1;
+
+        let mut buf = Vec::new();
+        rmpv::encode::write_value(&mut buf, &Value::Array(request))
+            .map_err(|e| format!("Failed to encode command: {}", e))?;
+
+        self.stdin.write_all(&buf)
+            .map_err(|e| format!("Failed to write command: {}", e))?;
+        self.stdin.flush()
+            .map_err(|e| format!("Failed to flush: {}", e))?;
+
+        Ok(())
     }
 
     /// Poll for events from Neovim

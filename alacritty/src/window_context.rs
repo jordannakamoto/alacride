@@ -430,6 +430,15 @@ impl WindowContext {
 
         self.dirty = false;
 
+        // Check if we're in Neovim mode
+        if self.nvim_mode.is_some() {
+            eprintln!("🔥🔥🔥 DRAW: nvim_mode is active, calling draw_nvim_mode");
+            self.draw_nvim_mode();
+            return;
+        } else {
+            eprintln!("🔥🔥🔥 DRAW: nvim_mode is None, using regular terminal draw");
+        }
+
         // Force the display to process any pending display update.
         self.display.process_renderer_update();
 
@@ -493,20 +502,24 @@ impl WindowContext {
             offset
         };
 
-        // Get renderable cells and active scroll region from Neovim
-        let (cells, scroll_region): (Vec<_>, _) = if let Some(nvim_mode) = &self.nvim_mode {
-            let cells = nvim_mode.get_renderable_cells().collect();
+        // Get renderable cells, cursor, and active scroll region from Neovim
+        let (cells, scroll_region, cursor_pos) = if let Some(nvim_mode) = &self.nvim_mode {
+            let cells = nvim_mode.get_renderable_cells();
             let scroll_region = nvim_mode.active_scroll_region();
-            (cells, scroll_region)
+            let cursor = nvim_mode.get_cursor();
+            eprintln!("🔥🔥🔥 CURSOR FROM NVIM: row={}, col={}", cursor.0, cursor.1);
+            let cursor_pos = Some(cursor);
+            (cells, scroll_region, cursor_pos)
         } else {
-            (vec![], None)
+            (vec![], None, None)
         };
 
-        crate::nvim_debug!("🔥 RENDER Drawing {} cells with offset {}, active_scroll_region={:?}",
-                  cells.len(), pixel_offset, scroll_region);
+        crate::nvim_debug!("🔥 RENDER Drawing {} cells with offset {}, active_scroll_region={:?}, cursor={:?}",
+                  cells.len(), pixel_offset, scroll_region, cursor_pos);
+        eprintln!("🔥🔥🔥 ABOUT TO CALL draw_nvim_cells with cursor_pos={:?}", cursor_pos);
 
         // Draw the cells with smooth scrolling (only active scroll region gets offset)
-        self.display.draw_nvim_cells(cells.into_iter(), pixel_offset, scroll_region);
+        self.display.draw_nvim_cells(cells.into_iter(), pixel_offset, scroll_region, cursor_pos);
 
         // Request continuous redraw if smooth scrolling
         let renderer = self.display.renderer_mut();

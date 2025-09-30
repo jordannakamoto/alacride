@@ -2062,11 +2062,95 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     WindowEvent::ModifiersChanged(modifiers) => self.modifiers_input(modifiers),
                     WindowEvent::MouseInput { state, button, .. } => {
                         self.ctx.window().set_mouse_visible(true);
-                        self.mouse_input(state, button);
+
+                        // Handle mouse clicks in Neovim mode
+                        let mut handled = false;
+                        if let Some(nvim_mode) = self.ctx.nvim_mode {
+                            if nvim_mode.is_active() {
+                                // Convert mouse position to grid coordinates and send to Neovim
+                                let size_info = &self.ctx.display.size_info;
+                                let mouse_x = self.ctx.mouse.x;
+                                let mouse_y = self.ctx.mouse.y;
+
+                                let col = (mouse_x.saturating_sub(size_info.padding_x() as usize)) / (size_info.cell_width() as usize);
+                                let row = (mouse_y.saturating_sub(size_info.padding_y() as usize)) / (size_info.cell_height() as usize);
+
+                                // Send mouse input to Neovim
+                                let button_str = match button {
+                                    winit::event::MouseButton::Left => "left",
+                                    winit::event::MouseButton::Right => "right",
+                                    winit::event::MouseButton::Middle => "middle",
+                                    _ => "left",
+                                };
+
+                                let action = match state {
+                                    winit::event::ElementState::Pressed => "press",
+                                    winit::event::ElementState::Released => "release",
+                                };
+
+                                let mouse_cmd = format!("nvim_input_mouse('{}', '{}', '', 0, {}, {})",
+                                    button_str, action, row, col);
+
+                                if let Err(e) = nvim_mode.exec_command(&format!("call {}", mouse_cmd)) {
+                                    error!("Failed to send mouse input to Neovim: {}", e);
+                                } else {
+                                    handled = true;
+                                    *self.ctx.dirty = true;
+                                }
+                            }
+                        }
+
+                        if !handled {
+                            self.mouse_input(state, button);
+                        }
                     },
                     WindowEvent::CursorMoved { position, .. } => {
                         self.ctx.window().set_mouse_visible(true);
-                        self.mouse_moved(position);
+
+                        // Handle mouse movement in Neovim mode (for drag operations)
+                        let mut handled = false;
+                        if let Some(nvim_mode) = self.ctx.nvim_mode {
+                            if nvim_mode.is_active() {
+                                // Check if any mouse button is pressed (drag operation)
+                                let is_dragging = self.ctx.mouse.left_button_state == winit::event::ElementState::Pressed
+                                    || self.ctx.mouse.right_button_state == winit::event::ElementState::Pressed
+                                    || self.ctx.mouse.middle_button_state == winit::event::ElementState::Pressed;
+
+                                if is_dragging {
+                                    // Convert mouse position to grid coordinates
+                                    let size_info = &self.ctx.display.size_info;
+                                    let mouse_x = self.ctx.mouse.x;
+                                    let mouse_y = self.ctx.mouse.y;
+
+                                    let col = (mouse_x.saturating_sub(size_info.padding_x() as usize)) / (size_info.cell_width() as usize);
+                                    let row = (mouse_y.saturating_sub(size_info.padding_y() as usize)) / (size_info.cell_height() as usize);
+
+                                    // Determine which button is being dragged
+                                    let button_str = if self.ctx.mouse.left_button_state == winit::event::ElementState::Pressed {
+                                        "left"
+                                    } else if self.ctx.mouse.right_button_state == winit::event::ElementState::Pressed {
+                                        "right"
+                                    } else {
+                                        "middle"
+                                    };
+
+                                    // Send drag event to Neovim
+                                    let mouse_cmd = format!("nvim_input_mouse('{}', 'drag', '', 0, {}, {})",
+                                        button_str, row, col);
+
+                                    if let Err(e) = nvim_mode.exec_command(&format!("call {}", mouse_cmd)) {
+                                        error!("Failed to send mouse drag to Neovim: {}", e);
+                                    } else {
+                                        handled = true;
+                                        *self.ctx.dirty = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if !handled {
+                            self.mouse_moved(position);
+                        }
                     },
                     WindowEvent::MouseWheel { delta, phase, .. } => {
                         if self.ctx.config.debug.smooth_scroll_debug {
@@ -2094,24 +2178,34 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                 let _ = nvim_mode.query_buffer_last_line();
 
                                 // Process any pending events to get fresh grid data
-                                let size_info_clone = self.ctx.display.size_info.clone();
-                                nvim_mode.process_events(self.ctx.display.renderer_mut(), &size_info_clone);
+                                let size_info = self.ctx.display.size_info;
+                                nvim_mode.process_events(self.ctx.display.renderer_mut(), &size_info);
 
-                                // Check boundaries immediately after processing events - kill momentum if at boundary
+                                // Check boundaries but allow smooth scroll animation to complete
+                                // Only prevent accumulating new scroll offset in wrong direction
                                 let at_top = nvim_mode.get_top_line_number() == Some(1);
                                 let at_bottom = nvim_mode.is_at_buffer_bottom();
 
+                                // Don't kill momentum immediately - just prevent further accumulation
+                                let current_offset = self.ctx.display.renderer_mut().get_nvim_scroll_offset();
+
                                 if at_top && pixel_delta < 0.0 {
-                                    crate::nvim_debug!("🔥 SCROLL: At top boundary, killing momentum");
-                                    self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
-                                    *self.ctx.dirty = true;
+                                    // At top boundary scrolling up - only reset if offset is already positive
+                                    if current_offset > 0.0 {
+                                        crate::nvim_debug!("🔥 SCROLL: At top boundary, resetting positive offset");
+                                        self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
+                                        *self.ctx.dirty = true;
+                                    }
                                     return;
                                 }
 
                                 if at_bottom && pixel_delta > 0.0 {
-                                    crate::nvim_debug!("🔥 SCROLL: At bottom boundary, killing downward momentum (pixel_delta={})", pixel_delta);
-                                    self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
-                                    *self.ctx.dirty = true;
+                                    // At bottom boundary scrolling down - only reset if offset is negative
+                                    if current_offset < 0.0 {
+                                        crate::nvim_debug!("🔥 SCROLL: At bottom boundary, resetting negative offset");
+                                        self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
+                                        *self.ctx.dirty = true;
+                                    }
                                     return;
                                 }
 
@@ -2145,21 +2239,22 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                              lines_scrolled.abs(), if lines_scrolled > 0 { "UP" } else { "DOWN" },
                                              top_line_before);
 
-                                    // Send scroll commands to Neovim
+                                    // Send scroll commands directly using Neovim API (doesn't trigger custom keymaps)
+                                    // Use 'normal!' command which executes in normal mode without triggering mappings
                                     for _ in 0..lines_scrolled.abs() {
                                         let command = if lines_scrolled > 0 {
-                                            "<C-O><C-Y>"  // Scroll up
+                                            "normal! \x19"  // Execute Ctrl-Y in normal mode (scroll viewport up)
                                         } else {
-                                            "<C-O><C-E>"  // Scroll down
+                                            "normal! \x05"  // Execute Ctrl-E in normal mode (scroll viewport down)
                                         };
-                                        if let Err(e) = nvim_mode.send_input(command) {
+                                        if let Err(e) = nvim_mode.exec_command(command) {
                                             eprintln!("Failed to send scroll: {}", e);
                                         }
                                     }
 
-                                    // Process Neovim events to update grid (for scroll up, or final update for scroll down)
-                                    let size_info_clone = self.ctx.display.size_info.clone();
-                                    nvim_mode.process_events(self.ctx.display.renderer_mut(), &size_info_clone);
+                                    // Process Neovim events to update grid
+                                    let size_info = self.ctx.display.size_info;
+                                    nvim_mode.process_events(self.ctx.display.renderer_mut(), &size_info);
 
                                     // Keep only the fractional part
                                     let fractional_offset = new_offset - (lines_scrolled as f32 * cell_height);
@@ -2271,13 +2366,25 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     | WindowEvent::Moved(_) => (),
                 }
             },
+            WinitEvent::AboutToWait => {
+                // Process Neovim events even when idle to keep UI responsive (telescope previews, etc)
+                if let Some(nvim_mode) = self.ctx.nvim_mode {
+                    if nvim_mode.is_active() {
+                        let size_info = self.ctx.display.size_info;
+                        nvim_mode.process_events(self.ctx.display.renderer_mut(), &size_info);
+                        // Mark dirty if there were events to process
+                        if nvim_mode.is_active() {
+                            *self.ctx.dirty = true;
+                        }
+                    }
+                }
+            },
             WinitEvent::Suspended
             | WinitEvent::NewEvents { .. }
             | WinitEvent::DeviceEvent { .. }
             | WinitEvent::LoopExiting
             | WinitEvent::Resumed
-            | WinitEvent::MemoryWarning
-            | WinitEvent::AboutToWait => (),
+            | WinitEvent::MemoryWarning => (),
         }
     }
 }

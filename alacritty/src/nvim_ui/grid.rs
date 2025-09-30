@@ -97,6 +97,9 @@ impl Grid {
 
     /// Define a highlight attribute
     pub fn define_hl_attr(&mut self, id: u64, attrs: HighlightAttrs) {
+        // Debug: Log ALL highlight attributes to see visual selection colors
+        eprintln!("🎨 HL_ATTR_DEFINE: id={}, fg={:?}, bg={:?}, bold={}, italic={}, reverse={}",
+            id, attrs.foreground, attrs.background, attrs.bold, attrs.italic, attrs.reverse);
         self.hl_attrs.insert(id, attrs);
     }
 
@@ -117,14 +120,26 @@ impl Grid {
                 .cloned()
                 .unwrap_or_default();
 
-            // Determine colors
-            let fg = hl_attrs.foreground.unwrap_or(self.default_fg);
-            let bg = hl_attrs.background.unwrap_or(self.default_bg);
-            let sp = hl_attrs.special.unwrap_or(self.default_sp);
-
-            // Convert text to characters
+            // Convert text to characters first
             let chars: Vec<char> = cell_data.text.chars().collect();
             let character = chars.first().copied().unwrap_or(' ');
+
+            // Determine colors
+            let fg = hl_attrs.foreground.unwrap_or(self.default_fg);
+            let mut bg = hl_attrs.background.unwrap_or(self.default_bg);
+            let sp = hl_attrs.special.unwrap_or(self.default_sp);
+
+            // Override selection color to bright blue for visibility
+            // Check if this is a selection by looking at the specific highlight ID or background color
+            let is_selection = hl_attrs.background.is_some() && bg != self.default_bg;
+
+            if is_selection {
+                // Only log occasionally to avoid spam
+                if row < 35 && row > 25 && col < 50 {
+                    eprintln!("🎨 SELECTION: row={}, col={}, char='{}', hl_id={:?}", row, col, character, hl_id);
+                }
+                bg = Rgb::new(70, 130, 255); // Bright blue
+            }
 
             // Create cell
             let grid_cell = GridCell {

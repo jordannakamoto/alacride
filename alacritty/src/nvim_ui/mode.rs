@@ -5,8 +5,10 @@
 use log::{debug, error, info};
 
 use crate::display::content::RenderableCell;
+use crate::display::color::Rgb;
 use crate::display::SizeInfo;
 use crate::nvim_ui::{Grid, NvimClient, NvimEvent, NvimRendererBridge, RedrawEvent};
+use crate::nvim_ui::grid::GridCell;
 use crate::renderer::Renderer;
 
 use alacritty_terminal::index::{Point, Column, Line};
@@ -139,14 +141,49 @@ impl NvimMode {
         }
     }
 
+    /// Get cursor position
+    pub fn get_cursor(&self) -> (usize, usize) {
+        self.grid.cursor()
+    }
+
     /// Get renderable cells from the grid
-    pub fn get_renderable_cells(&self) -> impl Iterator<Item = RenderableCell> + '_ {
+    pub fn get_renderable_cells(&self) -> Vec<RenderableCell> {
         let (width, height) = self.grid.dimensions();
         let (cursor_row, cursor_col) = self.grid.cursor();
 
-        (0..height).flat_map(move |row| {
-            (0..width).filter_map(move |col| {
-                self.grid.get_cell(row, col).map(|cell| {
+        // Pre-scan to find selection ranges on each line
+        let selection_blue = Rgb::new(70, 130, 255);
+        let default_bg = Rgb::new(30, 30, 46); // Approximate default bg
+
+        let mut line_selections: Vec<Option<(usize, usize)>> = vec![None; height];
+
+        for row in 0..height {
+            let mut first_selected = None;
+            let mut last_selected = None;
+
+            for col in 0..width {
+                if let Some(cell) = self.grid.get_cell(row, col) {
+                    // Check if this cell has a selection background (bright blue or non-default bg)
+                    if cell.bg == selection_blue || (cell.bg != default_bg && cell.bg != Rgb::new(0, 0, 0)) {
+                        if first_selected.is_none() {
+                            first_selected = Some(col);
+                        }
+                        last_selected = Some(col);
+                    }
+                }
+            }
+
+            if let (Some(first), Some(last)) = (first_selected, last_selected) {
+                line_selections[row] = Some((first, last));
+            }
+        }
+
+        // Generate cells with filled selection ranges
+        let mut cells = Vec::new();
+
+        for row in 0..height {
+            for col in 0..width {
+                if let Some(cell) = self.grid.get_cell(row, col) {
                     let mut flags = Flags::empty();
 
                     if cell.bold {
@@ -159,24 +196,42 @@ impl NvimMode {
                         flags |= Flags::UNDERLINE;
                     }
 
-                    RenderableCell {
+                    // Check if this cell is within a selection range
+                    let bg = if let Some((first, last)) = line_selections[row] {
+                        if col >= first && col <= last {
+                            selection_blue
+                        } else {
+                            cell.bg
+                        }
+                    } else {
+                        cell.bg
+                    };
+
+                    cells.push(RenderableCell {
                         point: Point { line: row, column: Column(col) },
                         character: cell.character,
                         extra: None,
                         flags,
                         bg_alpha: 1.0,
                         fg: cell.fg,
-                        bg: cell.bg,
+                        bg,
                         underline: cell.sp,
-                    }
-                })
-            })
-        })
+                    });
+                }
+            }
+        }
+
+        cells
     }
 
     /// Send input to Neovim
     pub fn send_input(&mut self, input: &str) -> Result<(), String> {
         self.client.input(input)
+    }
+
+    /// Execute a Vim command directly (doesn't trigger keymaps)
+    pub fn exec_command(&mut self, command: &str) -> Result<(), String> {
+        self.client.exec_command(command)
     }
 
     /// Resize the Neovim UI

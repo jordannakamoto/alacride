@@ -27,6 +27,7 @@ impl IntoRects for RenderableCursor {
         width *= self.width().get() as f32;
 
         match self.shape() {
+            CursorShape::Block => block(x, y, width, height, self.color()),
             CursorShape::Beam => beam(x, y, height, thickness, self.color()),
             CursorShape::Underline => underline(x, y, width, height, thickness, self.color()),
             CursorShape::HollowBlock => hollow(x, y, width, height, thickness, self.color()),
@@ -56,6 +57,11 @@ impl Iterator for CursorRects {
         self.index += 1;
         rect.take()
     }
+}
+
+/// Create an iterator yielding a single filled block rect.
+fn block(x: f32, y: f32, width: f32, height: f32, color: Rgb) -> CursorRects {
+    RenderRect::new(x, y, width, height, color, 1.).into()
 }
 
 /// Create an iterator yielding a single beam rect.

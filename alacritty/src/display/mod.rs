@@ -556,12 +556,13 @@ impl Display {
         &mut self.renderer
     }
 
-    /// Draw Neovim cells with smooth scrolling
+    /// Draw Neovim cells with smooth scrolling, cursor, and selection
     pub fn draw_nvim_cells<I: Iterator<Item = crate::display::content::RenderableCell>>(
         &mut self,
         cells: I,
         pixel_offset: f32,
         scroll_region: Option<(i64, i64)>,
+        cursor_pos: Option<(usize, usize)>,
     ) {
         let size_info = self.size_info;
         let bg_color = self.colors[alacritty_terminal::vte::ansi::NamedColor::Background];
@@ -585,6 +586,61 @@ impl Display {
         } else {
             // No active scroll region - apply offset to all cells for smooth scrolling
             self.renderer.draw_cells_smooth(&size_info, &mut self.glyph_cache, cells, pixel_offset);
+        }
+
+        // Prepare cursor rects if cursor position is provided
+        eprintln!("🔥🔥🔥 draw_nvim_cells: cursor_pos={:?}, size_info: screen_lines={}, columns={}",
+            cursor_pos, size_info.screen_lines(), size_info.columns());
+
+        let cursor_rects = if let Some((cursor_row, cursor_col)) = cursor_pos {
+            use alacritty_terminal::vte::ansi::CursorShape;
+            use crate::display::content::RenderableCursor;
+            use std::num::NonZeroU32;
+
+            eprintln!("🔥🔥🔥 CURSOR: Preparing cursor at row={}, col={} (screen has {} lines, {} cols)",
+                cursor_row, cursor_col, size_info.screen_lines(), size_info.columns());
+
+            // Check if cursor is within screen bounds
+            if cursor_row >= size_info.screen_lines() {
+                eprintln!("🔥🔥🔥 CURSOR: ERROR - cursor row {} is outside screen bounds (max {})",
+                    cursor_row, size_info.screen_lines() - 1);
+            }
+            if cursor_col >= size_info.columns() {
+                eprintln!("🔥🔥🔥 CURSOR: ERROR - cursor col {} is outside screen bounds (max {})",
+                    cursor_col, size_info.columns() - 1);
+            }
+
+            // Use a bright white cursor for visibility
+            let cursor_color = Rgb::new(255, 255, 255);
+            eprintln!("🔥🔥🔥 CURSOR: cursor_color={:?}", cursor_color);
+
+            let cursor_width = NonZeroU32::new(1).unwrap();
+
+            // Create Point<usize> manually (Point struct has public fields)
+            let cursor_point_usize = alacritty_terminal::index::Point::<usize> {
+                line: cursor_row,
+                column: alacritty_terminal::index::Column(cursor_col),
+            };
+            eprintln!("🔥🔥🔥 CURSOR: cursor_point_usize={:?}", cursor_point_usize);
+
+            let cursor = RenderableCursor::new(cursor_point_usize, CursorShape::Block, cursor_color, cursor_width);
+            eprintln!("🔥🔥🔥 CURSOR: RenderableCursor created, calling rects()...");
+            let rects: Vec<_> = cursor.rects(&size_info, 1.0).collect();
+
+            eprintln!("🔥🔥🔥 CURSOR: Generated {} cursor rects: {:?}", rects.len(), rects);
+            rects
+        } else {
+            eprintln!("🔥🔥🔥 CURSOR: No cursor position provided");
+            vec![]
+        };
+
+        // Draw cursor rectangles BEFORE swapping buffers
+        eprintln!("🔥🔥🔥 CURSOR: About to draw {} cursor rects", cursor_rects.len());
+        if !cursor_rects.is_empty() {
+            let metrics = self.glyph_cache.font_metrics();
+            eprintln!("🔥🔥🔥 CURSOR: Calling draw_rects...");
+            self.renderer.draw_rects(&size_info, &metrics, cursor_rects);
+            eprintln!("🔥🔥🔥 CURSOR: draw_rects completed");
         }
 
         // Swap buffers
