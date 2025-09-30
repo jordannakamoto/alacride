@@ -2126,11 +2126,14 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                 let lines_scrolled = (new_offset / cell_height).trunc() as i32;
 
                                 if lines_scrolled != 0 {
-                                    // Check bottom boundary BEFORE sending scroll down commands
-                                    let at_bottom = nvim_mode.is_at_buffer_bottom();
-                                    if at_bottom && lines_scrolled < 0 {
-                                        // Already at bottom and trying to scroll down - reject the scroll
-                                        crate::nvim_debug!("🔥 SCROLL: At bottom boundary, rejecting scroll down");
+                                    // Check boundaries BEFORE sending scroll commands (consistent for both directions)
+                                    let at_top_now = nvim_mode.get_top_line_number() == Some(1);
+                                    let at_bottom_now = nvim_mode.is_at_buffer_bottom();
+
+                                    if (at_top_now && lines_scrolled > 0) || (at_bottom_now && lines_scrolled < 0) {
+                                        // At boundary and trying to scroll past it - reject
+                                        crate::nvim_debug!("🔥 SCROLL: At boundary, rejecting scroll (at_top={}, at_bottom={}, lines={})",
+                                                 at_top_now, at_bottom_now, lines_scrolled);
                                         self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
                                         *self.ctx.dirty = true;
                                         return;
