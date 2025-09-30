@@ -2142,8 +2142,8 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                              lines_scrolled.abs(), if lines_scrolled > 0 { "UP" } else { "DOWN" },
                                              top_line_before);
 
-                                    // Send scroll commands to Neovim, checking boundaries after each command
-                                    for i in 0..lines_scrolled.abs() {
+                                    // Send scroll commands to Neovim
+                                    for _ in 0..lines_scrolled.abs() {
                                         let command = if lines_scrolled > 0 {
                                             "<C-O><C-Y>"  // Scroll up
                                         } else {
@@ -2151,19 +2151,6 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                         };
                                         if let Err(e) = nvim_mode.send_input(command) {
                                             eprintln!("Failed to send scroll: {}", e);
-                                        }
-
-                                        // Process events and check if we hit bottom after each scroll
-                                        if lines_scrolled < 0 {
-                                            let size_info_clone = self.ctx.display.size_info.clone();
-                                            nvim_mode.process_events(self.ctx.display.renderer_mut(), &size_info_clone);
-
-                                            if nvim_mode.is_at_buffer_bottom() {
-                                                eprintln!("🔥 SCROLL: Hit bottom after {} of {} scrolls, stopping", i + 1, lines_scrolled.abs());
-                                                self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
-                                                *self.ctx.dirty = true;
-                                                return;
-                                            }
                                         }
                                     }
 
