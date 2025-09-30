@@ -264,23 +264,27 @@ impl NvimMode {
         Ok(())
     }
 
-    /// Check if we're at the bottom by comparing visible bottom line with buffer last line
+    /// Check if we're at the bottom - buffer's last line must be at the bottom of viewport
     pub fn is_at_buffer_bottom(&self) -> bool {
         let visible_bottom = self.grid.get_bottom_line_number();
         let buffer_last = self.buffer_last_line;
 
-        // Compare the bottom visible line number with the buffer's last line
-        let result = if let (Some(visible_bottom), Some(buffer_last)) = (visible_bottom, buffer_last) {
+        // Check if buffer's last line is at the bottom of the screen (or past it)
+        let result = if let (Some(buffer_last), Some(visible_bottom)) = (buffer_last, visible_bottom) {
+            // We're at bottom if the last visible row shows the buffer's last line (or beyond)
             let at_bottom = visible_bottom >= buffer_last;
             eprintln!("🔥 BOTTOM CHECK: visible_bottom={}, buffer_last={}, at_bottom={}",
                       visible_bottom, buffer_last, at_bottom);
             at_bottom
+        } else if visible_bottom.is_none() {
+            // Can't parse line number from bottom row - we've scrolled past content
+            eprintln!("🔥 BOTTOM CHECK: Bottom row is blank (visible_bottom=None) - AT BOTTOM");
+            true
         } else {
-            // If we can't determine, fall back to grid detection
-            let fallback = self.grid.get_bottom_line_number().is_none();
-            eprintln!("🔥 BOTTOM CHECK: fallback mode - visible_bottom={:?}, buffer_last={:?}, result={}",
-                      visible_bottom, buffer_last, fallback);
-            fallback
+            // Don't have buffer info yet
+            eprintln!("🔥 BOTTOM CHECK: No buffer info yet - visible_bottom={:?}, buffer_last={:?}",
+                      visible_bottom, buffer_last);
+            false
         };
 
         result

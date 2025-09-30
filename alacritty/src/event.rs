@@ -2093,18 +2093,31 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                 // Query buffer last line periodically to keep it updated
                                 let _ = nvim_mode.query_buffer_last_line();
 
-                                // Apply smooth scroll - positive delta = scroll up (content moves down)
-                                let current_offset = self.ctx.display.renderer_mut().get_nvim_scroll_offset();
-                                let new_offset = current_offset - pixel_delta;
+                                // Process any pending events to get fresh grid data
+                                let size_info_clone = self.ctx.display.size_info.clone();
+                                nvim_mode.process_events(self.ctx.display.renderer_mut(), &size_info_clone);
 
-                                // Check top boundary early (it's reliable from grid)
+                                // Check boundaries immediately after processing events - kill momentum if at boundary
                                 let at_top = nvim_mode.get_top_line_number() == Some(1);
+                                let at_bottom = nvim_mode.is_at_buffer_bottom();
+
                                 if at_top && pixel_delta < 0.0 {
                                     eprintln!("🔥 SCROLL: At top boundary, killing momentum");
                                     self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
                                     *self.ctx.dirty = true;
                                     return;
                                 }
+
+                                if at_bottom && pixel_delta > 0.0 {
+                                    eprintln!("🔥 SCROLL: At bottom boundary, killing downward momentum (pixel_delta={})", pixel_delta);
+                                    self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
+                                    *self.ctx.dirty = true;
+                                    return;
+                                }
+
+                                // Apply smooth scroll - positive delta = scroll up (content moves down)
+                                let current_offset = self.ctx.display.renderer_mut().get_nvim_scroll_offset();
+                                let new_offset = current_offset - pixel_delta;
 
                                 eprintln!("🔥 SCROLL: pixel_delta={}, current={}, new={}, at_top={}",
                                          pixel_delta, current_offset, new_offset, at_top);
@@ -2113,14 +2126,24 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                 let lines_scrolled = (new_offset / cell_height).trunc() as i32;
 
                                 if lines_scrolled != 0 {
+                                    // Check bottom boundary BEFORE sending scroll down commands
+                                    let at_bottom = nvim_mode.is_at_buffer_bottom();
+                                    if at_bottom && lines_scrolled < 0 {
+                                        // Already at bottom and trying to scroll down - reject the scroll
+                                        eprintln!("🔥 SCROLL: At bottom boundary, rejecting scroll down");
+                                        self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
+                                        *self.ctx.dirty = true;
+                                        return;
+                                    }
+
                                     let top_line_before = nvim_mode.get_top_line_number();
 
                                     eprintln!("🔥 SCROLL: Sending {} lines ({}), top_line_before={:?}",
                                              lines_scrolled.abs(), if lines_scrolled > 0 { "UP" } else { "DOWN" },
                                              top_line_before);
 
-                                    // Send scroll commands to Neovim
-                                    for _ in 0..lines_scrolled.abs() {
+                                    // Send scroll commands to Neovim, checking boundaries after each command
+                                    for i in 0..lines_scrolled.abs() {
                                         let command = if lines_scrolled > 0 {
                                             "<C-O><C-Y>"  // Scroll up
                                         } else {
@@ -2129,25 +2152,29 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                         if let Err(e) = nvim_mode.send_input(command) {
                                             eprintln!("Failed to send scroll: {}", e);
                                         }
+
+                                        // Process events and check if we hit bottom after each scroll
+                                        if lines_scrolled < 0 {
+                                            let size_info_clone = self.ctx.display.size_info.clone();
+                                            nvim_mode.process_events(self.ctx.display.renderer_mut(), &size_info_clone);
+
+                                            if nvim_mode.is_at_buffer_bottom() {
+                                                eprintln!("🔥 SCROLL: Hit bottom after {} of {} scrolls, stopping", i + 1, lines_scrolled.abs());
+                                                self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
+                                                *self.ctx.dirty = true;
+                                                return;
+                                            }
+                                        }
                                     }
 
-                                    // Process Neovim events to update grid
+                                    // Process Neovim events to update grid (for scroll up, or final update for scroll down)
                                     let size_info_clone = self.ctx.display.size_info.clone();
                                     nvim_mode.process_events(self.ctx.display.renderer_mut(), &size_info_clone);
 
-                                    // NOW check if we're at bottom (after grid is updated)
-                                    let at_bottom = nvim_mode.is_at_buffer_bottom();
-
-                                    if at_bottom && lines_scrolled < 0 {
-                                        // Hit bottom while scrolling down - reset offset
-                                        eprintln!("🔥 SCROLL: Hit bottom after scroll");
-                                        self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
-                                    } else {
-                                        // Keep only the fractional part
-                                        let fractional_offset = new_offset - (lines_scrolled as f32 * cell_height);
-                                        eprintln!("🔥 SCROLL: Fractional offset={}", fractional_offset);
-                                        self.ctx.display.renderer_mut().set_nvim_scroll_offset(fractional_offset);
-                                    }
+                                    // Keep only the fractional part
+                                    let fractional_offset = new_offset - (lines_scrolled as f32 * cell_height);
+                                    eprintln!("🔥 SCROLL: Fractional offset={}", fractional_offset);
+                                    self.ctx.display.renderer_mut().set_nvim_scroll_offset(fractional_offset);
                                 } else {
                                     // Accumulating offset (not yet a full line)
                                     let at_top = nvim_mode.get_top_line_number() == Some(1);
@@ -2157,8 +2184,9 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                     if at_top && new_offset > 0.0 {
                                         eprintln!("🔥 SCROLL: At top boundary while accumulating ({}), resetting", new_offset);
                                         self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
-                                    } else if at_bottom && new_offset < 0.0 {
-                                        eprintln!("🔥 SCROLL: At bottom boundary while accumulating ({}), resetting", new_offset);
+                                    } else if at_bottom {
+                                        // At bottom - don't allow ANY negative offset
+                                        eprintln!("🔥 SCROLL: At bottom boundary, resetting offset (was {})", new_offset);
                                         self.ctx.display.renderer_mut().set_nvim_scroll_offset(0.0);
                                     } else {
                                         // Not at boundary, allow accumulation

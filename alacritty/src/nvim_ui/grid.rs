@@ -267,39 +267,38 @@ impl Grid {
     }
 
     /// Get the bottom visible line number from the grid (assumes :set number is enabled)
-    /// This just parses the line number from any visible row with content
+    /// Checks the LAST visible row (before buffer rows) - this is rows[n-3] where n is height
     pub fn get_bottom_line_number(&self) -> Option<u32> {
-        if self.height < 2 || self.width < 5 {
+        if self.height < 3 || self.width < 5 {
             return None;
         }
 
-        // Check the last few rows to find any valid line number
-        // (we have buffer lines so not all rows may have content)
-        for offset in 0..3.min(self.height) {
-            let row = self.height - 1 - offset;
+        // Grid has height+2 rows total (includes 2 buffer rows)
+        // Last visible row is at index (height - 3)
+        // For example: if height=48, visible rows are 0-45, buffer rows are 46-47
+        // So check row 45 (which is height-3 = 48-3 = 45)
+        let last_visible_row_index = self.height.saturating_sub(3);
 
-            let line_num_text: String = (0..5.min(self.width))
-                .filter_map(|col| {
-                    let idx = row * self.width + col;
-                    if idx < self.cells.len() {
-                        let ch = self.cells[idx].character;
-                        if ch.is_ascii_digit() || ch == ' ' {
-                            Some(ch)
-                        } else {
-                            None
-                        }
+        let line_num_text: String = (0..5.min(self.width))
+            .filter_map(|col| {
+                let idx = last_visible_row_index * self.width + col;
+                if idx < self.cells.len() {
+                    let ch = self.cells[idx].character;
+                    if ch.is_ascii_digit() || ch == ' ' {
+                        Some(ch)
                     } else {
                         None
                     }
-                })
-                .collect();
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-            if let Ok(num) = line_num_text.trim().parse::<u32>() {
-                return Some(num);
-            }
-        }
-
-        None
+        let result = line_num_text.trim().parse().ok();
+        eprintln!("🔥 BOTTOM LINE: checking row[{}] (height={}, total rows={}), text='{}' -> {:?}",
+                  last_visible_row_index, self.height, self.height, line_num_text, result);
+        result
     }
 
     /// Check if the last row has no line number (we're past the end of content)
